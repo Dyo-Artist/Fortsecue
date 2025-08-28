@@ -18,6 +18,8 @@ def _store_preview(preview: str) -> dict[str, str]:
 
 @app.post("/ingest/audio")
 async def ingest_audio(file: UploadFile = File(...)) -> dict[str, str]:
+    if not file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="Invalid audio type")
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
