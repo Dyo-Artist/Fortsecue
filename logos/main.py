@@ -36,3 +36,26 @@ async def search(q: str) -> list[dict[str, object]]:
         }
         for r in results
     ]
+
+
+@app.get("/graph/ego")
+async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
+    results = run_query(
+        (
+            "MATCH (p:Person {id: $person_id}) "
+            "OPTIONAL MATCH (p)-[r]-(n) "
+            "WITH p, collect(r) AS rels, collect(n) AS ns "
+            "RETURN "
+            "[{id: p.id, name: p.name, labels: labels(p)}] AS pnodes, "
+            "[x IN ns WHERE x IS NOT NULL | {id: x.id, name: x.name, labels: labels(x)}] AS nodes, "
+            "[x IN rels WHERE x IS NOT NULL | {source: startNode(x).id, target: endNode(x).id, type: type(x)}] AS edges"
+        ),
+        {"person_id": person_id},
+    )
+    rows = list(results)
+    row = rows[0] if rows else {"pnodes": [], "nodes": [], "edges": []}
+    return {
+        "pnodes": row.get("pnodes", []),
+        "nodes": row.get("nodes", []),
+        "edges": row.get("edges", []),
+    }
