@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from pydantic import BaseModel
 
 from .graphio.upsert import upsert_interaction
 from .graphio.neo4j_client import run_query
@@ -14,6 +15,17 @@ def _store_preview(preview: str) -> dict[str, str]:
     interaction_id = str(uuid4())
     PREVIEW_CACHE[interaction_id] = preview
     return {"interaction_id": interaction_id, "preview": preview}
+
+
+class Doc(BaseModel):
+    source_uri: str
+    text: str
+
+
+@app.post("/ingest/doc")
+async def ingest_doc(doc: Doc) -> dict[str, str]:
+    """Ingest plain text documents and return an interaction id."""
+    return _store_preview(doc.text)
 
 
 @app.post("/ingest/audio")
