@@ -1,10 +1,32 @@
-from fastapi import FastAPI, HTTPException
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException, UploadFile, File
 
 from .graphio.upsert import upsert_interaction
 from .graphio.neo4j_client import run_query
 
 app = FastAPI()
 PREVIEW_CACHE: dict[str, str] = {}
+
+
+def _store_preview(preview: str) -> dict[str, str]:
+    """Store preview text and return a new interaction id."""
+    interaction_id = str(uuid4())
+    PREVIEW_CACHE[interaction_id] = preview
+    return {"interaction_id": interaction_id, "preview": preview}
+
+
+@app.post("/ingest/audio")
+async def ingest_audio(file: UploadFile = File(...)) -> dict[str, str]:
+    if file.content_type not in {"audio/wav", "audio/mpeg"}:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+
+    preview = "transcribed"
+    return _store_preview(preview)
 
 
 @app.post("/commit/{interaction_id}")
