@@ -12,8 +12,8 @@ def test_search_endpoint_returns_results(monkeypatch):
     client = TestClient(main.app)
 
     fake_results = [
-        {"labels": ["Person"], "id": "p1", "name": "Alice", "score": 0.9},
-        {"labels": ["Org"], "id": "o1", "name": "Acme", "score": 0.8},
+        {"labels": ["Person"], "props": {"id": "p1", "name": "Alice"}, "score": 0.9},
+        {"labels": ["Org"], "props": {"id": "o1", "name": "Acme"}, "score": 0.8},
     ]
 
     captured = {}
@@ -27,6 +27,9 @@ def test_search_endpoint_returns_results(monkeypatch):
 
     response = client.get("/search?q=test")
     assert response.status_code == 200
-    assert response.json() == fake_results
+    assert response.json() == [
+        {"id": "p1", "name": "Alice", "labels": ["Person"], "_score": 0.9},
+        {"id": "o1", "name": "Acme", "labels": ["Org"], "_score": 0.8},
+    ]
     assert "logos_name_idx" in captured["query"]
     assert captured["params"] == {"q": "test"}

@@ -97,18 +97,13 @@ async def search(q: str) -> list[dict[str, object]]:
         (
             "CALL db.index.fulltext.queryNodes('logos_name_idx', $q) "
             "YIELD node, score "
-            "RETURN labels(node) AS labels, node.id AS id, node.name AS name, score "
+            "RETURN labels(node) AS labels, node{.*} AS props, score "
             "ORDER BY score DESC LIMIT 10"
         ),
         {"q": q},
     )
     return [
-        {
-            "labels": r["labels"],
-            "id": r["id"],
-            "name": r["name"],
-            "score": r["score"],
-        }
+        {**r["props"], "labels": r["labels"], "_score": r["score"]}
         for r in results
     ]
 
@@ -123,7 +118,7 @@ async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
             "RETURN "
             "[{id: p.id, name: p.name, labels: labels(p)}] AS pnodes, "
             "[x IN ns WHERE x IS NOT NULL | {id: x.id, name: x.name, labels: labels(x)}] AS nodes, "
-            "[x IN rels WHERE x IS NOT NULL | {source: startNode(x).id, target: endNode(x).id, type: type(x)}] AS edges"
+            "[x IN rels WHERE x IS NOT NULL | {src: startNode(x).id, dst: endNode(x).id, rel: type(x)}] AS edges"
         ),
         {"person_id": person_id},
     )

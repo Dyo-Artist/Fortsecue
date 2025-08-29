@@ -15,7 +15,7 @@ def test_ego_graph_returns_expected_keys(monkeypatch):
         {
             "pnodes": [{"id": "p1"}],
             "nodes": [{"id": "p2"}],
-            "edges": [{"source": "p1", "target": "p2", "type": "KNOWS"}],
+            "edges": [{"src": "p1", "dst": "p2", "rel": "KNOWS"}],
         }
     ]
 
@@ -28,3 +28,4 @@ def test_ego_graph_returns_expected_keys(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert set(data.keys()) == {"pnodes", "nodes", "edges"}
+    assert data["edges"] == [{"src": "p1", "dst": "p2", "rel": "KNOWS"}]
