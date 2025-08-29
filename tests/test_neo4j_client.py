@@ -22,7 +22,7 @@ def test_ensure_indexes_calls_expected_cypher(monkeypatch):
         "CREATE CONSTRAINT contract_id IF NOT EXISTS FOR (n:Contract) REQUIRE n.id IS UNIQUE",
         "CREATE CONSTRAINT commitment_id IF NOT EXISTS FOR (n:Commitment) REQUIRE n.id IS UNIQUE",
         "CREATE CONSTRAINT interaction_id IF NOT EXISTS FOR (n:Interaction) REQUIRE n.id IS UNIQUE",
-        "CREATE FULLTEXT INDEX logos_name_idx IF NOT EXISTS FOR (n:Person|Org|Project|Contract|Commitment|Interaction) ON EACH [n.name]",
+        "CALL db.index.fulltext.createNodeIndex('logos_name_idx', ['Person','Org','Project','Contract','Commitment'], ['name'], { ifNotExists: true })",
     ]
 
     assert calls == expected

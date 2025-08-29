@@ -43,12 +43,28 @@ def test_upsert_interaction_mentions(monkeypatch):
         captured["params"] = params
 
     monkeypatch.setattr(upsert, "run_query", fake_run_query)
-    upsert.upsert_interaction("i1", "hello", ["p1", "p2"])
+    upsert.upsert_interaction(
+        "i1",
+        "email",
+        "2024-01-01T00:00:00",
+        0.1,
+        "hello",
+        "uri",
+        ["p1", "p2"],
+    )
     assert (
         captured["query"]
-        == "MERGE (i:Interaction {id: $id}) SET i.preview = $preview WITH i UNWIND $mention_ids AS mid MERGE (p:Person {id: mid}) MERGE (i)-[:MENTIONS]->(p)"
+        == "MERGE (i:Interaction {id: $id}) SET i.type=$type, i.at=datetime($at), i.sentiment=$sentiment, i.summary=$summary, i.source_uri=$source_uri, i.last_seen=datetime() WITH i UNWIND $mention_ids AS mid MERGE (p:Person {id: mid}) MERGE (i)-[:MENTIONS]->(p)"
     )
-    assert captured["params"] == {"id": "i1", "preview": "hello", "mention_ids": ["p1", "p2"]}
+    assert captured["params"] == {
+        "id": "i1",
+        "type": "email",
+        "at": "2024-01-01T00:00:00",
+        "sentiment": 0.1,
+        "summary": "hello",
+        "source_uri": "uri",
+        "mention_ids": ["p1", "p2"],
+    }
 
 
 def test_upsert_commitment(monkeypatch):

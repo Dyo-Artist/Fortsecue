@@ -23,14 +23,32 @@ def upsert_person(person_id: str, name: str, org_id: Optional[str] = None) -> No
 
 def upsert_interaction(
     interaction_id: str,
-    preview: str,
+    type_: str,
+    at: str,
+    sentiment: float,
+    summary: str,
+    source_uri: str,
     mention_person_ids: Optional[Sequence[str]] = None,
 ) -> None:
     """Upsert an Interaction node and optional MENTIONS relations."""
-    query = "MERGE (i:Interaction {id: $id}) SET i.preview = $preview"
-    params = {"id": interaction_id, "preview": preview}
+    query = (
+        "MERGE (i:Interaction {id: $id}) "
+        "SET i.type=$type, i.at=datetime($at), i.sentiment=$sentiment, "
+        "i.summary=$summary, i.source_uri=$source_uri, i.last_seen=datetime()"
+    )
+    params = {
+        "id": interaction_id,
+        "type": type_,
+        "at": at,
+        "sentiment": sentiment,
+        "summary": summary,
+        "source_uri": source_uri,
+    }
     if mention_person_ids:
-        query += " WITH i UNWIND $mention_ids AS mid MERGE (p:Person {id: mid}) MERGE (i)-[:MENTIONS]->(p)"
+        query += (
+            " WITH i UNWIND $mention_ids AS mid MERGE (p:Person {id: mid}) "
+            "MERGE (i)-[:MENTIONS]->(p)"
+        )
         params["mention_ids"] = list(mention_person_ids)
     run_query(query, params)
 
