@@ -10,7 +10,7 @@ from logos import main
 
 def test_commit_endpoint_writes_preview(monkeypatch):
     client = TestClient(main.app)
-    main.PREVIEW_CACHE["i1"] = "hello"
+    main.PREVIEWS["i1"] = {"interaction": {"summary": "hello"}}
 
     called = {}
 

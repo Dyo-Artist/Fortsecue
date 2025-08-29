@@ -25,5 +25,5 @@ def test_ingest_audio_stores_preview(filename: str, mimetype: str) -> None:
     response = asyncio.run(_run())
     assert response.status_code == 200
     data = response.json()
-    assert data["preview"] == "transcribed"
-    assert main.PREVIEW_CACHE[data["interaction_id"]] == "transcribed"
+    assert data["preview"]["interaction"]["summary"] == "transcribed"
+    assert main.PREVIEWS[data["interaction_id"]] == data["preview"]

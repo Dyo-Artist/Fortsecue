@@ -1,4 +1,6 @@
+from datetime import datetime
 from uuid import uuid4
+import re
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel
@@ -7,13 +9,46 @@ from .graphio.upsert import upsert_interaction
 from .graphio.neo4j_client import run_query
 
 app = FastAPI()
-PREVIEW_CACHE: dict[str, str] = {}
+PREVIEWS: dict[str, dict[str, object]] = {}
 
 
-def _store_preview(preview: str) -> dict[str, str]:
-    """Store preview text and return a new interaction id."""
+def _extract_entities(text: str) -> dict[str, list[str]]:
+    """Extract simple entities from text."""
+    person_pattern = re.compile(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b")
+    org_pattern = re.compile(
+        r"\b([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*)*\s+(?:Pty Ltd|Pty|Ltd|LLC|Inc|Corporation|Corp|Company))\b"
+    )
+    commitment_pattern = re.compile(
+        r"\b(?:will|shall)\b[^.]*?\bby\s+[^\.\n]+", re.IGNORECASE
+    )
+    persons = person_pattern.findall(text)
+    orgs = org_pattern.findall(text)
+    commitments = commitment_pattern.findall(text)
+    return {
+        "persons": persons,
+        "orgs": orgs,
+        "commitments": commitments,
+        "projects": [],
+    }
+
+
+def _store_preview(text: str, source_uri: str) -> dict[str, object]:
+    """Build and store preview for the given text."""
     interaction_id = str(uuid4())
-    PREVIEW_CACHE[interaction_id] = preview
+    entities = _extract_entities(text)
+    preview = {
+        "entities": entities,
+        "relationships": [],
+        "interaction": {
+            "id": interaction_id,
+            "type": "document",
+            "at": datetime.utcnow().isoformat(),
+            "sentiment": 0.0,
+            "summary": text[:140],
+            "source_uri": source_uri,
+        },
+    }
+    PREVIEWS[interaction_id] = preview
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -23,28 +58,28 @@ class Doc(BaseModel):
 
 
 @app.post("/ingest/doc")
-async def ingest_doc(doc: Doc) -> dict[str, str]:
+async def ingest_doc(doc: Doc) -> dict[str, object]:
     """Ingest plain text documents and return an interaction id."""
-    return _store_preview(doc.text)
+    return _store_preview(doc.text, doc.source_uri)
 
 
 @app.post("/ingest/audio")
-async def ingest_audio(file: UploadFile = File(...)) -> dict[str, str]:
+async def ingest_audio(file: UploadFile = File(...)) -> dict[str, object]:
     if not file.content_type.startswith("audio/"):
         raise HTTPException(status_code=400, detail="Invalid audio type")
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     preview = "transcribed"
-    return _store_preview(preview)
+    return _store_preview(preview, "")
 
 
 @app.post("/commit/{interaction_id}")
 async def commit(interaction_id: str) -> dict[str, str]:
-    preview = PREVIEW_CACHE.get(interaction_id)
+    preview = PREVIEWS.get(interaction_id)
     if preview is None:
         raise HTTPException(status_code=404, detail="Preview not found")
-    upsert_interaction(interaction_id, preview)
+    upsert_interaction(interaction_id, preview["interaction"]["summary"])
     return {"status": "committed"}
 
 
