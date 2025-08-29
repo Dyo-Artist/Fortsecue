@@ -3,10 +3,11 @@ from uuid import uuid4
 import re
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from .graphio.upsert import upsert_interaction
-from .graphio.neo4j_client import run_query
+from .graphio.neo4j_client import GraphUnavailable, ping, run_query
 
 app = FastAPI()
 PREVIEWS: dict[str, dict[str, object]] = {}
@@ -80,28 +81,34 @@ async def commit(interaction_id: str) -> dict[str, str]:
     if preview is None:
         raise HTTPException(status_code=404, detail="Preview not found")
     interaction = preview["interaction"]
-    upsert_interaction(
-        interaction_id,
-        interaction["type"],
-        interaction["at"],
-        interaction["sentiment"],
-        interaction["summary"],
-        interaction["source_uri"],
-    )
+    try:
+        upsert_interaction(
+            interaction_id,
+            interaction["type"],
+            interaction["at"],
+            interaction["sentiment"],
+            interaction["summary"],
+            interaction["source_uri"],
+        )
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     return {"status": "committed"}
 
 
 @app.get("/search")
 async def search(q: str) -> list[dict[str, object]]:
-    results = run_query(
-        (
-            "CALL db.index.fulltext.queryNodes('logos_name_idx', $q) "
-            "YIELD node, score "
-            "RETURN labels(node) AS labels, node{.*} AS props, score "
-            "ORDER BY score DESC LIMIT 10"
-        ),
-        {"q": q},
-    )
+    try:
+        results = run_query(
+            (
+                "CALL db.index.fulltext.queryNodes('logos_name_idx', $q) "
+                "YIELD node, score "
+                "RETURN labels(node) AS labels, node{.*} AS props, score "
+                "ORDER BY score DESC LIMIT 10"
+            ),
+            {"q": q},
+        )
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     return [
         {**r["props"], "labels": r["labels"], "_score": r["score"]}
         for r in results
@@ -110,18 +117,21 @@ async def search(q: str) -> list[dict[str, object]]:
 
 @app.get("/graph/ego")
 async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
-    results = run_query(
-        (
-            "MATCH (p:Person {id: $person_id}) "
-            "OPTIONAL MATCH (p)-[r]-(n) "
-            "WITH p, collect(r) AS rels, collect(n) AS ns "
-            "RETURN "
-            "[{id: p.id, name: p.name, labels: labels(p)}] AS pnodes, "
-            "[x IN ns WHERE x IS NOT NULL | {id: x.id, name: x.name, labels: labels(x)}] AS nodes, "
-            "[x IN rels WHERE x IS NOT NULL | {src: startNode(x).id, dst: endNode(x).id, rel: type(x)}] AS edges"
-        ),
-        {"person_id": person_id},
-    )
+    try:
+        results = run_query(
+            (
+                "MATCH (p:Person {id: $person_id}) "
+                "OPTIONAL MATCH (p)-[r]-(n) "
+                "WITH p, collect(r) AS rels, collect(n) AS ns "
+                "RETURN "
+                "[{id: p.id, name: p.name, labels: labels(p)}] AS pnodes, "
+                "[x IN ns WHERE x IS NOT NULL | {id: x.id, name: x.name, labels: labels(x)}] AS nodes, "
+                "[x IN rels WHERE x IS NOT NULL | {src: startNode(x).id, dst: endNode(x).id, rel: type(x)}] AS edges"
+            ),
+            {"person_id": person_id},
+        )
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     rows = list(results)
     row = rows[0] if rows else {"pnodes": [], "nodes": [], "edges": []}
     return {
@@ -133,16 +143,19 @@ async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
 
 @app.get("/alerts")
 async def alerts() -> dict[str, list[dict[str, object]]]:
-    unresolved_results = run_query(
-        (
-            "MATCH (c:Commitment)<-[:MADE]-(p:Person) "
-            "WHERE c.status NOT IN ['accepted', 'done'] "
-            "AND c.due_date < date() - duration('P7D') "
-            "RETURN c.id AS id, c.description AS description, "
-            "c.due_date AS due_date, c.status AS status, "
-            "p.id AS person_id, p.name AS person_name"
+    try:
+        unresolved_results = run_query(
+            (
+                "MATCH (c:Commitment)<-[:MADE]-(p:Person) "
+                "WHERE c.status NOT IN ['accepted', 'done'] "
+                "AND c.due_date < date() - duration('P7D') "
+                "RETURN c.id AS id, c.description AS description, "
+                "c.due_date AS due_date, c.status AS status, "
+                "p.id AS person_id, p.name AS person_name"
+            )
         )
-    )
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     unresolved = [
         {
             "id": r["id"],
@@ -155,16 +168,19 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
         for r in unresolved_results
     ]
 
-    sentiment_results = run_query(
-        (
-            "MATCH (o:Org)<-[:WORKS_FOR]-(p:Person)<-[:MENTIONS]-(i:Interaction) "
-            "WHERE i.date >= date() - duration('P14D') "
-            "WITH o, i ORDER BY i.date DESC "
-            "WITH o, collect(i.sentiment)[0..3] AS last3 "
-            "WHERE size(last3) = 3 AND all(s IN last3 WHERE s = 'negative') "
-            "RETURN o.id AS org_id, o.name AS org_name"
+    try:
+        sentiment_results = run_query(
+            (
+                "MATCH (o:Org)<-[:WORKS_FOR]-(p:Person)<-[:MENTIONS]-(i:Interaction) "
+                "WHERE i.date >= date() - duration('P14D') "
+                "WITH o, i ORDER BY i.date DESC "
+                "WITH o, collect(i.sentiment)[0..3] AS last3 "
+                "WHERE size(last3) = 3 AND all(s IN last3 WHERE s = 'negative') "
+                "RETURN o.id AS org_id, o.name AS org_name"
+            )
         )
-    )
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     sentiment = [
         {"org_id": r["org_id"], "org_name": r["org_name"]}
         for r in sentiment_results
@@ -173,4 +189,13 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
     return {
         "unresolved_commitments": unresolved,
         "sentiment_drop": sentiment,
+    }
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    status = ping()
+    return {
+        "neo4j": "up" if status["ok"] else "down",
+        "reason": status["reason"],
     }
