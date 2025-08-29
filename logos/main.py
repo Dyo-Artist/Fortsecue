@@ -79,7 +79,15 @@ async def commit(interaction_id: str) -> dict[str, str]:
     preview = PREVIEWS.get(interaction_id)
     if preview is None:
         raise HTTPException(status_code=404, detail="Preview not found")
-    upsert_interaction(interaction_id, preview["interaction"]["summary"])
+    interaction = preview["interaction"]
+    upsert_interaction(
+        interaction_id,
+        interaction["type"],
+        interaction["at"],
+        interaction["sentiment"],
+        interaction["summary"],
+        interaction["source_uri"],
+    )
     return {"status": "committed"}
 
 

@@ -38,7 +38,7 @@ def ensure_indexes() -> None:
             f"CREATE CONSTRAINT {label.lower()}_id IF NOT EXISTS FOR (n:{label}) REQUIRE n.id IS UNIQUE"
         )
     run_query(
-        "CREATE FULLTEXT INDEX logos_name_idx IF NOT EXISTS FOR (n:Person|Org|Project|Contract|Commitment|Interaction) ON EACH [n.name]"
+        "CALL db.index.fulltext.createNodeIndex('logos_name_idx', ['Person','Org','Project','Contract','Commitment'], ['name'], { ifNotExists: true })"
     )
 
 
