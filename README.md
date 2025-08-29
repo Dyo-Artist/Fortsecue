@@ -1,6 +1,14 @@
 # Fortsecue
 For Fortescue related diagrams and code
 
+## Dependencies
+
+- fastapi
+- httpx
+- pytest
+- python-multipart
+- ruff
+
 ## Development
 
 Run `./setup.sh` to install dependencies and run lint/tests. The script hashes
