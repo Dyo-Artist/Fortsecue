@@ -13,6 +13,7 @@ def test_ensure_indexes_calls_expected_cypher(monkeypatch):
         calls.append(query)
 
     monkeypatch.setattr(neo4j_client, "run_query", fake_run_query)
+    monkeypatch.setattr(neo4j_client, "_driver", object())
     neo4j_client.ensure_indexes()
 
     expected = [
