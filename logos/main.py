@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from .graphio.upsert import upsert_interaction
 from .graphio.neo4j_client import GraphUnavailable, ping, run_query
+from .services.transcription import TranscriptionError, transcribe_audio
 
 app = FastAPI()
 PREVIEWS: dict[str, dict[str, object]] = {}
@@ -71,8 +72,12 @@ async def ingest_audio(file: UploadFile = File(...)) -> dict[str, object]:
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-    preview = "transcribed"
-    return _store_preview(preview, "")
+    try:
+        transcript = await transcribe_audio(data, file.content_type)
+    except TranscriptionError as exc:
+        raise HTTPException(status_code=502, detail="Transcription failed") from exc
+    source_uri = file.filename or ""
+    return _store_preview(transcript, source_uri)
 
 
 @app.post("/commit/{interaction_id}")
