@@ -24,7 +24,7 @@ from .graphio.upsert import (
     upsert_topic,
 )
 from .graphio.neo4j_client import GraphUnavailable, ping, run_query
-from .ingest import doc_ingest
+from .ingest import doc_ingest, note_ingest
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
 from .nlp.extract import extract_all
 
@@ -37,6 +37,12 @@ PREVIEWS = PENDING_INTERACTIONS
 class Doc(BaseModel):
     source_uri: str
     text: str
+
+
+class Note(BaseModel):
+    text: str
+    source_uri: str | None = None
+    topic: str | None = None
 
 
 class AudioPayload(BaseModel):
@@ -213,6 +219,20 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
     metadata = _build_interaction_metadata(
         type_=interaction_stub.get("type", "document"),
         source_uri=interaction_stub.get("source_uri", doc.source_uri),
+        at=interaction_stub.get("at"),
+    )
+    preview = _persist_preview(interaction_id, metadata, extraction)
+    return {"interaction_id": interaction_id, "preview": preview}
+
+
+@app.post("/ingest/note")
+async def ingest_note(note: Note) -> dict[str, object]:
+    interaction_stub, raw_text = note_ingest(note.model_dump())
+    extraction = extract_all(raw_text)
+    interaction_id = uuid4().hex
+    metadata = _build_interaction_metadata(
+        type_=interaction_stub.get("type", "note"),
+        source_uri=interaction_stub.get("source_uri", note.source_uri or ""),
         at=interaction_stub.get("at"),
     )
     preview = _persist_preview(interaction_id, metadata, extraction)
