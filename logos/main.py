@@ -9,6 +9,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .graphio import graph_views
+from .graphio import search as search_module
+from .graphio.graph_views import ego_network
+from .graphio.search import search_entities, search_interactions
 from .graphio.upsert import (
     upsert_commitment,
     upsert_contract,
@@ -263,47 +267,25 @@ async def health() -> dict[str, str]:
 @app.get("/search")
 async def search(q: str) -> list[dict[str, object]]:
     try:
-        results = run_query(
-            (
-                "CALL db.index.fulltext.queryNodes('logos_name_idx', $q) "
-                "YIELD node, score "
-                "RETURN labels(node) AS labels, node{.*} AS props, score "
-                "ORDER BY score DESC LIMIT 10"
-            ),
-            {"q": q},
-        )
+        search_module.run_query = run_query
+        return search_entities(q)
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
-    return [
-        {**r["props"], "labels": r["labels"], "_score": r["score"]}
-        for r in results
-    ]
 
 
 @app.get("/graph/ego")
 async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
     try:
-        results = run_query(
-            (
-                "MATCH (p:Person {id: $person_id}) "
-                "OPTIONAL MATCH (p)-[r]-(n) "
-                "WITH p, collect(r) AS rels, collect(n) AS ns "
-                "RETURN "
-                "[{id: p.id, name: p.name, labels: labels(p)}] AS pnodes, "
-                "[x IN ns WHERE x IS NOT NULL | {id: x.id, name: x.name, labels: labels(x)}] AS nodes, "
-                "[x IN rels WHERE x IS NOT NULL | {src: startNode(x).id, dst: endNode(x).id, rel: type(x)}] AS edges"
-            ),
-            {"person_id": person_id},
-        )
+        graph_views.run_query = run_query
+        network = ego_network(person_id)
+        if "pnodes" not in network:
+            pnodes = [
+                node for node in network.get("nodes", []) if node.get("id") == person_id
+            ]
+            network = {"pnodes": pnodes, **network}
+        return network
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
-    rows = list(results)
-    row = rows[0] if rows else {"pnodes": [], "nodes": [], "edges": []}
-    return {
-        "pnodes": row.get("pnodes", []),
-        "nodes": row.get("nodes", []),
-        "edges": row.get("edges", []),
-    }
 
 
 @app.get("/alerts")
