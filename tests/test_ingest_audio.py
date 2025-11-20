@@ -5,7 +5,6 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import asyncio
 import httpx
-import pytest
 from unittest.mock import AsyncMock, patch
 
 from logos import main
