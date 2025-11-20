@@ -76,8 +76,8 @@ def test_upsert_commitment(monkeypatch):
 
     monkeypatch.setattr(upsert, "run_query", fake_run_query)
     upsert.upsert_commitment("c1", "Do it", "p1")
-    assert (
-        captured["query"]
-        == "MERGE (c:Commitment {id: $id}) SET c.description = $description MERGE (p:Person {id: $person_id}) MERGE (p)-[:MADE]->(c)"
+    assert captured["query"] == (
+        "MERGE (c:Commitment {id: $id}) SET c.text = $text, c.status = $status, c.last_seen = datetime() "
+        "MERGE (p:Person {id: $person_id}) MERGE (p)-[:MADE]->(c)"
     )
-    assert captured["params"] == {"id": "c1", "description": "Do it", "person_id": "p1"}
+    assert captured["params"] == {"id": "c1", "text": "Do it", "status": "open", "person_id": "p1"}
