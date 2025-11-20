@@ -5,52 +5,49 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 import asyncio
 import httpx
-from unittest.mock import AsyncMock, patch
+from unittest.mock import Mock, patch
 
 from logos import main
-from logos.services.transcription import TranscriptionError
 
 
-async def _post_audio(filename: str, mimetype: str, data: bytes) -> httpx.Response:
+async def _post_audio(payload: dict) -> httpx.Response:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=main.app), base_url="http://test"
     ) as client:
-        files = {"file": (filename, data, mimetype)}
-        return await client.post("/ingest/audio", files=files)
+        return await client.post("/ingest/audio", json=payload)
 
 
 def test_ingest_audio_success() -> None:
     async def _run() -> httpx.Response:
-        with patch("logos.main.transcribe_audio", new=AsyncMock(return_value="hello world")):
-            return await _post_audio("test.wav", "audio/wav", b"0" * 4)
+        with patch("logos.main.transcribe", new=Mock(return_value={"text": "hello world"})):
+            return await _post_audio({"source_uri": "file://audio.wav"})
 
     response = asyncio.run(_run())
     assert response.status_code == 200
     data = response.json()
     assert data["preview"]["interaction"]["summary"] == "hello world"
-    assert main.PREVIEWS[data["interaction_id"]] == data["preview"]
+    assert main.PENDING_INTERACTIONS[data["interaction_id"]] == data["preview"]
 
 
 def test_ingest_audio_provider_failure() -> None:
     async def _run() -> httpx.Response:
         with patch(
-            "logos.main.transcribe_audio",
-            new=AsyncMock(side_effect=TranscriptionError("boom")),
+            "logos.main.transcribe", new=Mock(side_effect=main.TranscriptionFailure("boom"))
         ):
-            return await _post_audio("test.wav", "audio/wav", b"0" * 4)
+            return await _post_audio({"source_uri": "file://audio.wav"})
 
     response = asyncio.run(_run())
-    assert response.status_code == 502
-    assert response.json() == {"detail": "Transcription failed"}
+    assert response.status_code == 400
+    assert response.json() == {"detail": "boom"}
 
 
 def test_ingest_audio_empty_payload() -> None:
-    response = asyncio.run(_post_audio("test.wav", "audio/wav", b""))
+    response = asyncio.run(_post_audio({"source_uri": ""}))
     assert response.status_code == 400
-    assert response.json() == {"detail": "Empty file"}
+    assert response.json() == {"detail": "Source URI is required for transcription"}
 
 
 def test_ingest_audio_invalid_mime_type() -> None:
-    response = asyncio.run(_post_audio("test.txt", "text/plain", b"data"))
+    response = asyncio.run(_post_audio({}))
     assert response.status_code == 400
-    assert response.json() == {"detail": "Invalid audio type"}
+    assert response.json() == {"detail": "Source URI is required for transcription"}

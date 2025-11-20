@@ -21,6 +21,57 @@ def upsert_person(person_id: str, name: str, org_id: Optional[str] = None) -> No
     run_query(query, params)
 
 
+def upsert_project(project_id: str, name: str, status: Optional[str] = None) -> None:
+    """Upsert a Project node."""
+    query = "MERGE (p:Project {id: $id}) SET p.name = $name, p.last_seen = datetime()"
+    params = {"id": project_id, "name": name}
+    if status:
+        query += ", p.status = $status"
+        params["status"] = status
+    run_query(query, params)
+
+
+def upsert_contract(
+    contract_id: str,
+    name: Optional[str] = None,
+    sap_id: Optional[str] = None,
+    value: Optional[float] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> None:
+    """Upsert a Contract node with optional metadata."""
+
+    params: dict[str, object] = {"id": contract_id}
+    set_parts = ["c.last_seen = datetime()"]
+
+    if name:
+        params["name"] = name
+        set_parts.append("c.name = $name")
+    if sap_id:
+        params["sap_id"] = sap_id
+        set_parts.append("c.sap_id = $sap_id")
+    if value is not None:
+        params["value"] = value
+        set_parts.append("c.value = $value")
+    if start_date:
+        params["start_date"] = start_date
+        set_parts.append("c.start_date = date($start_date)")
+    if end_date:
+        params["end_date"] = end_date
+        set_parts.append("c.end_date = date($end_date)")
+
+    query = "MERGE (c:Contract {id: $id}) SET " + ", ".join(set_parts)
+    run_query(query, params)
+
+
+def upsert_topic(topic_id: str, name: str) -> None:
+    """Upsert a Topic node."""
+    run_query(
+        "MERGE (t:Topic {id: $id}) SET t.name = $name, t.last_seen = datetime()",
+        {"id": topic_id, "name": name},
+    )
+
+
 def upsert_interaction(
     interaction_id: str,
     type_: str,
@@ -98,3 +149,28 @@ def upsert_commitment(
         query_parts.append("MERGE (c)-[:RELATES_TO]->(ct)")
 
     run_query(" ".join(query_parts), params)
+
+
+def upsert_relationship(
+    src_id: str,
+    dst_id: str,
+    rel_type: str,
+    *,
+    src_label: Optional[str] = None,
+    dst_label: Optional[str] = None,
+    properties: Optional[dict[str, object]] = None,
+) -> None:
+    """Create or update a relationship between two existing nodes."""
+
+    allowed = {"MADE", "RELATES_TO", "WORKS_FOR", "INVOLVED_IN", "PARTY_TO", "MENTIONS", "INFLUENCES"}
+    if rel_type not in allowed:
+        raise ValueError(f"Unsupported relationship type: {rel_type}")
+
+    src = "(a" + (f":{src_label}" if src_label else "") + " {id: $src})"
+    dst = "(b" + (f":{dst_label}" if dst_label else "") + " {id: $dst})"
+    query = f"MATCH {src} MATCH {dst} MERGE (a)-[r:{rel_type}]->(b)"
+    params: dict[str, object] = {"src": src_id, "dst": dst_id}
+    if properties:
+        query += " SET r += $props"
+        params["props"] = properties
+    run_query(query, params)

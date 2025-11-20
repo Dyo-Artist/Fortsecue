@@ -24,7 +24,7 @@ def test_health_reports_down_when_no_driver(monkeypatch):
 def test_commit_returns_503_when_graph_down(monkeypatch):
     _down(monkeypatch)
     client = TestClient(main.app)
-    main.PREVIEWS["i1"] = {
+    main.PENDING_INTERACTIONS["i1"] = {
         "interaction": {
             "type": "email",
             "at": "2024-01-01T00:00:00",
