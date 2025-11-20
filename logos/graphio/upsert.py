@@ -53,9 +53,48 @@ def upsert_interaction(
     run_query(query, params)
 
 
-def upsert_commitment(commitment_id: str, description: str, person_id: str) -> None:
-    """Upsert a Commitment node and relate it to a Person via MADE."""
-    run_query(
-        "MERGE (c:Commitment {id: $id}) SET c.description = $description MERGE (p:Person {id: $person_id}) MERGE (p)-[:MADE]->(c)",
-        {"id": commitment_id, "description": description, "person_id": person_id},
-    )
+def upsert_commitment(
+    commitment_id: str,
+    text: str,
+    person_id: str,
+    *,
+    due_date: Optional[str] = None,
+    status: str = "open",
+    relates_to_project_id: Optional[str] = None,
+    relates_to_contract_id: Optional[str] = None,
+) -> None:
+    """Upsert a Commitment node with provenance and relationships.
+
+    All LOGOS nodes must carry last_seen for provenance. Commitments also
+    optionally relate to a Project or Contract via RELATES_TO.
+    """
+
+    params: dict[str, object] = {
+        "id": commitment_id,
+        "text": text,
+        "status": status,
+        "person_id": person_id,
+    }
+
+    set_parts = ["c.text = $text", "c.status = $status", "c.last_seen = datetime()"]
+    if due_date:
+        params["due_date"] = due_date
+        set_parts.append("c.due_date = date($due_date)")
+
+    query_parts = [
+        "MERGE (c:Commitment {id: $id})",
+        "SET " + ", ".join(set_parts),
+        "MERGE (p:Person {id: $person_id})",
+        "MERGE (p)-[:MADE]->(c)",
+    ]
+
+    if relates_to_project_id:
+        params["project_id"] = relates_to_project_id
+        query_parts.append("MERGE (pr:Project {id: $project_id})")
+        query_parts.append("MERGE (c)-[:RELATES_TO]->(pr)")
+    if relates_to_contract_id:
+        params["contract_id"] = relates_to_contract_id
+        query_parts.append("MERGE (ct:Contract {id: $contract_id})")
+        query_parts.append("MERGE (c)-[:RELATES_TO]->(ct)")
+
+    run_query(" ".join(query_parts), params)

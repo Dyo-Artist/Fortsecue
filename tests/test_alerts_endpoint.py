@@ -18,7 +18,7 @@ def test_alerts_lists(monkeypatch):
             return [
                 {
                     "id": "c1",
-                    "description": "desc",
+                    "text": "desc",
                     "due_date": "2024-01-01",
                     "status": "pending",
                     "person_id": "p1",
@@ -35,7 +35,7 @@ def test_alerts_lists(monkeypatch):
         "unresolved_commitments": [
             {
                 "id": "c1",
-                "description": "desc",
+                "text": "desc",
                 "due_date": "2024-01-01",
                 "status": "pending",
                 "person_id": "p1",

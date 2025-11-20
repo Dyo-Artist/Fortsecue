@@ -157,7 +157,7 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
                 "MATCH (c:Commitment)<-[:MADE]-(p:Person) "
                 "WHERE c.status NOT IN ['accepted', 'done'] "
                 "AND c.due_date < date() - duration('P7D') "
-                "RETURN c.id AS id, c.description AS description, "
+                "RETURN c.id AS id, c.text AS text, "
                 "c.due_date AS due_date, c.status AS status, "
                 "p.id AS person_id, p.name AS person_name"
             )
@@ -167,7 +167,7 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
     unresolved = [
         {
             "id": r["id"],
-            "description": r.get("description"),
+            "text": r.get("text"),
             "due_date": r.get("due_date"),
             "status": r.get("status"),
             "person_id": r.get("person_id"),
@@ -180,8 +180,8 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
         sentiment_results = run_query(
             (
                 "MATCH (o:Org)<-[:WORKS_FOR]-(p:Person)<-[:MENTIONS]-(i:Interaction) "
-                "WHERE i.date >= date() - duration('P14D') "
-                "WITH o, i ORDER BY i.date DESC "
+                "WHERE i.at >= datetime() - duration('P14D') "
+                "WITH o, i ORDER BY i.at DESC "
                 "WITH o, collect(i.sentiment)[0..3] AS last3 "
                 "WHERE size(last3) = 3 AND all(s IN last3 WHERE s = 'negative') "
                 "RETURN o.id AS org_id, o.name AS org_name"
