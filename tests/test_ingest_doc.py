@@ -25,7 +25,8 @@ def test_ingest_doc_extracts_entities() -> None:
     data = response.json()
     preview = data["preview"]
     assert data["interaction_id"]
+    assert preview["interaction"]["type"] == "document"
     assert len(preview["entities"]["orgs"]) >= 1
     assert len(preview["entities"]["persons"]) >= 1
     assert len(preview["entities"]["commitments"]) >= 1
-    assert main.PREVIEWS[data["interaction_id"]] == preview
+    assert main.PENDING_INTERACTIONS[data["interaction_id"]] == preview

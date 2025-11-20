@@ -1,60 +1,33 @@
 # This module is part of LOGOS (local-first stakeholder intelligence).
 # It must follow the architecture and schema defined in the LOGOS docs (/docs).
 # Pipeline: ingest → transcribe → nlp_extract → normalise → graphio → ui.
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
-import re
+from typing import Any, Dict
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .graphio.upsert import upsert_interaction
+from .graphio.upsert import (
+    upsert_commitment,
+    upsert_contract,
+    upsert_interaction,
+    upsert_org,
+    upsert_person,
+    upsert_project,
+    upsert_relationship,
+    upsert_topic,
+)
 from .graphio.neo4j_client import GraphUnavailable, ping, run_query
-from .services.transcription import TranscriptionError, transcribe_audio
+from .ingest import doc_ingest
+from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
+from .nlp.extract import extract_all
 
 app = FastAPI()
-PREVIEWS: dict[str, dict[str, object]] = {}
-
-
-def _extract_entities(text: str) -> dict[str, list[str]]:
-    """Extract simple entities from text."""
-    person_pattern = re.compile(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b")
-    org_pattern = re.compile(
-        r"\b([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*)*\s+(?:Pty Ltd|Pty|Ltd|LLC|Inc|Corporation|Corp|Company))\b"
-    )
-    commitment_pattern = re.compile(
-        r"\b(?:will|shall)\b[^.]*?\bby\s+[^\.\n]+", re.IGNORECASE
-    )
-    persons = person_pattern.findall(text)
-    orgs = org_pattern.findall(text)
-    commitments = commitment_pattern.findall(text)
-    return {
-        "persons": persons,
-        "orgs": orgs,
-        "commitments": commitments,
-        "projects": [],
-    }
-
-
-def _store_preview(text: str, source_uri: str) -> dict[str, object]:
-    """Build and store preview for the given text."""
-    interaction_id = str(uuid4())
-    entities = _extract_entities(text)
-    preview = {
-        "entities": entities,
-        "relationships": [],
-        "interaction": {
-            "id": interaction_id,
-            "type": "document",
-            "at": datetime.utcnow().isoformat(),
-            "sentiment": 0.0,
-            "summary": text[:140],
-            "source_uri": source_uri,
-        },
-    }
-    PREVIEWS[interaction_id] = preview
-    return {"interaction_id": interaction_id, "preview": preview}
+PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = {}
+# PREVIEWS is kept for backwards compatibility with existing callers/tests.
+PREVIEWS = PENDING_INTERACTIONS
 
 
 class Doc(BaseModel):
@@ -62,45 +35,229 @@ class Doc(BaseModel):
     text: str
 
 
+class AudioPayload(BaseModel):
+    source_uri: str = ""
+
+
+def _build_interaction_metadata(type_: str, source_uri: str, at: datetime | None = None) -> Dict[str, Any]:
+    return {
+        "type": type_,
+        "at": (at or datetime.now(timezone.utc)).isoformat(),
+        "source_uri": source_uri,
+    }
+
+
+def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extraction: Dict[str, Any]) -> Dict[str, Any]:
+    preview = {
+        "interaction": {
+            "id": interaction_id,
+            **interaction_meta,
+            "sentiment": extraction.get("sentiment"),
+            "summary": extraction.get("summary"),
+        },
+        "entities": extraction.get("entities", {}),
+        "relationships": extraction.get("relationships", []),
+    }
+    PENDING_INTERACTIONS[interaction_id] = preview
+    return preview
+
+
+def _normalise_entity_list(
+    entries: list[Any],
+    *,
+    id_fallbacks: tuple[str, ...] = ("id",),
+    name_field: str = "name",
+) -> list[dict[str, Any]]:
+    normalised: list[dict[str, Any]] = []
+    for entry in entries:
+        if isinstance(entry, str):
+            normalised.append({"id": entry, name_field: entry})
+            continue
+        if isinstance(entry, dict):
+            entity_id = next((entry.get(key) for key in id_fallbacks if entry.get(key)), None)
+            if not entity_id:
+                continue
+            record = dict(entry)
+            record["id"] = entity_id
+            if name_field not in record and entry.get("name"):
+                record[name_field] = entry["name"]
+            if name_field not in record and entry.get("text") and name_field != "text":
+                record[name_field] = entry["text"]
+            if name_field not in record:
+                record[name_field] = entity_id
+            normalised.append(record)
+    return normalised
+
+
+def _label_index(interaction_id: str, entities: dict[str, list[dict[str, Any]]]) -> dict[str, str]:
+    labels = {interaction_id: "Interaction"}
+    for label, key in [
+        ("Org", "orgs"),
+        ("Person", "persons"),
+        ("Project", "projects"),
+        ("Contract", "contracts"),
+        ("Topic", "topics"),
+        ("Commitment", "commitments"),
+    ]:
+        for item in entities.get(key, []):
+            if item.get("id"):
+                labels[item["id"]] = label
+    return labels
+
+
+def _commit_entities(interaction_id: str, preview: Dict[str, Any]) -> None:
+    interaction = preview.get("interaction", {})
+    interaction_id = interaction.get("id") or interaction_id
+    entities_raw = preview.get("entities", {})
+
+    entities = {
+        "orgs": _normalise_entity_list(entities_raw.get("orgs", []), name_field="name"),
+        "persons": _normalise_entity_list(
+            entities_raw.get("persons", []), name_field="name"
+        ),
+        "projects": _normalise_entity_list(
+            entities_raw.get("projects", []), name_field="name"
+        ),
+        "contracts": _normalise_entity_list(
+            entities_raw.get("contracts", []), name_field="name"
+        ),
+        "topics": _normalise_entity_list(entities_raw.get("topics", []), name_field="name"),
+        "commitments": _normalise_entity_list(
+            entities_raw.get("commitments", []), id_fallbacks=("id", "text"), name_field="text"
+        ),
+    }
+
+    for org in entities["orgs"]:
+        upsert_org(org["id"], org.get("name", org["id"]))
+
+    for person in entities["persons"]:
+        upsert_person(person["id"], person.get("name", person["id"]), org_id=person.get("org_id"))
+
+    for project in entities["projects"]:
+        upsert_project(project["id"], project.get("name", project["id"]), status=project.get("status"))
+
+    for contract in entities["contracts"]:
+        upsert_contract(
+            contract["id"],
+            contract.get("name", contract["id"]),
+            sap_id=contract.get("sap_id"),
+            value=contract.get("value"),
+            start_date=contract.get("start_date"),
+            end_date=contract.get("end_date"),
+        )
+
+    for topic in entities["topics"]:
+        upsert_topic(topic["id"], topic.get("name", topic["id"]))
+
+    for commitment in entities["commitments"]:
+        if not commitment.get("person_id"):
+            continue
+        upsert_commitment(
+            commitment["id"],
+            commitment.get("text", commitment["id"]),
+            commitment["person_id"],
+            due_date=commitment.get("due_date"),
+            status=commitment.get("status", "open"),
+            relates_to_project_id=commitment.get("relates_to_project_id"),
+            relates_to_contract_id=commitment.get("relates_to_contract_id"),
+        )
+
+    mention_person_ids = None
+    relationships = preview.get("relationships", [])
+    if relationships:
+        mention_person_ids = {
+            rel.get("dst")
+            for rel in relationships
+            if rel.get("rel") == "MENTIONS" and rel.get("dst")
+        }
+        if mention_person_ids:
+            mention_person_ids = list(mention_person_ids)
+
+    upsert_interaction(
+        interaction_id,
+        interaction.get("type", ""),
+        interaction.get("at", datetime.now(timezone.utc).isoformat()),
+        interaction.get("sentiment", 0.0),
+        interaction.get("summary", ""),
+        interaction.get("source_uri", ""),
+        mention_person_ids,
+    )
+
+    labels = _label_index(interaction_id, entities)
+    for rel in relationships:
+        src = rel.get("src")
+        dst = rel.get("dst")
+        rel_type = rel.get("rel")
+        if not src or not dst or not rel_type:
+            continue
+        upsert_relationship(
+            src,
+            dst,
+            rel_type,
+            src_label=labels.get(src),
+            dst_label=labels.get(dst),
+            properties={k: v for k, v in rel.items() if k not in {"src", "dst", "rel"}},
+        )
+
+
 @app.post("/ingest/doc")
 async def ingest_doc(doc: Doc) -> dict[str, object]:
     """Ingest plain text documents and return an interaction id."""
-    return _store_preview(doc.text, doc.source_uri)
+    interaction_stub, raw_text = doc_ingest(doc.model_dump())
+    extraction = extract_all(raw_text)
+    interaction_id = uuid4().hex
+    metadata = _build_interaction_metadata(
+        type_=interaction_stub.get("type", "document"),
+        source_uri=interaction_stub.get("source_uri", doc.source_uri),
+        at=interaction_stub.get("at"),
+    )
+    preview = _persist_preview(interaction_id, metadata, extraction)
+    return {"interaction_id": interaction_id, "preview": preview}
 
 
 @app.post("/ingest/audio")
-async def ingest_audio(file: UploadFile = File(...)) -> dict[str, object]:
-    if not file.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Invalid audio type")
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
+async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
     try:
-        transcript = await transcribe_audio(data, file.content_type)
-    except TranscriptionError as exc:
-        raise HTTPException(status_code=502, detail="Transcription failed") from exc
-    source_uri = file.filename or ""
-    return _store_preview(transcript, source_uri)
+        transcript = transcribe(payload.source_uri)
+    except TranscriptionFailure as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    text = transcript.get("text")
+    if not text:
+        raise HTTPException(status_code=502, detail="Transcription failed")
+
+    extraction = extract_all(text)
+    interaction_id = uuid4().hex
+    metadata = _build_interaction_metadata("audio", payload.source_uri)
+    preview = _persist_preview(interaction_id, metadata, extraction)
+    return {"interaction_id": interaction_id, "preview": preview}
 
 
 @app.post("/commit/{interaction_id}")
-async def commit(interaction_id: str) -> dict[str, str]:
-    preview = PREVIEWS.get(interaction_id)
+async def commit_interaction(interaction_id: str) -> dict[str, str]:
+    preview = PENDING_INTERACTIONS.get(interaction_id)
     if preview is None:
-        raise HTTPException(status_code=404, detail="Preview not found")
-    interaction = preview["interaction"]
+        raise HTTPException(status_code=404, detail="interaction not found")
+
     try:
-        upsert_interaction(
-            interaction_id,
-            interaction["type"],
-            interaction["at"],
-            interaction["sentiment"],
-            interaction["summary"],
-            interaction["source_uri"],
-        )
+        _commit_entities(interaction_id, preview)
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
-    return {"status": "committed"}
+
+    PENDING_INTERACTIONS.pop(interaction_id, None)
+    return {"status": "committed", "interaction_id": interaction_id}
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    try:
+        status = ping()
+    except GraphUnavailable:
+        return {"neo4j": "down", "reason": "neo4j_unavailable"}
+
+    if not status.get("ok"):
+        return {"neo4j": "down", "reason": status.get("reason", "neo4j_unavailable")}
+    return {"neo4j": "ok"}
 
 
 @app.get("/search")
@@ -197,13 +354,4 @@ async def alerts() -> dict[str, list[dict[str, object]]]:
     return {
         "unresolved_commitments": unresolved,
         "sentiment_drop": sentiment,
-    }
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    status = ping()
-    return {
-        "neo4j": "up" if status["ok"] else "down",
-        "reason": status["reason"],
     }
