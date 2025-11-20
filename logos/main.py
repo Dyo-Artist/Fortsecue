@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .graphio import graph_views
 from .graphio import search as search_module
-from .graphio.graph_views import ego_network
+from .graphio.graph_views import ego_network, project_map
 from .graphio.search import search_entities, search_interactions
 from .graphio.upsert import (
     upsert_commitment,
@@ -284,6 +284,15 @@ async def ego_graph(person_id: str) -> dict[str, list[dict[str, object]]]:
             ]
             network = {"pnodes": pnodes, **network}
         return network
+    except GraphUnavailable:
+        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
+
+
+@app.get("/graph/project")
+async def project_graph(project_id: str) -> dict[str, list[dict[str, object]]]:
+    try:
+        graph_views.run_query = run_query
+        return project_map(project_id)
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
 
