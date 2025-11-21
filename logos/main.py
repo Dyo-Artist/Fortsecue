@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from .graphio import graph_views
 from .graphio import search as search_module
 from .graphio.graph_views import ego_network, project_map
-from .graphio.search import search_entities, search_interactions
+from .graphio.search import search_entities
 from .graphio.upsert import (
     upsert_commitment,
     upsert_contract,
