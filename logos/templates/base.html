@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LOGOS – Ingest &amp; Preview</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.5; }
+    header { margin-bottom: 1.5rem; }
+    form { margin-bottom: 1.5rem; }
+    textarea { width: 100%; min-height: 120px; }
+    input[type="text"] { width: 100%; box-sizing: border-box; }
+    button { margin-top: 0.5rem; }
+    pre { background: #f5f5f5; padding: 1rem; border-radius: 4px; overflow: auto; }
+    .section { border: 1px solid #e0e0e0; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>LOGOS – Ingest &amp; Preview</h1>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

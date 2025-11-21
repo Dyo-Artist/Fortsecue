@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="section">
+    <h2>Ingest Document</h2>
+    <form action="/ui/ingest/doc" method="post">
+      <label for="doc-source">Source URI</label><br />
+      <input id="doc-source" type="text" name="source_uri" placeholder="source URI" />
+      <br />
+      <label for="doc-text">Text</label><br />
+      <textarea id="doc-text" name="text" placeholder="Paste document text here"></textarea>
+      <br />
+      <button type="submit">Submit Document</button>
+    </form>
+  </section>
+
+  <section class="section">
+    <h2>Ingest Note</h2>
+    <form action="/ui/ingest/note" method="post">
+      <label for="note-source">Source URI</label><br />
+      <input id="note-source" type="text" name="source_uri" placeholder="optional" />
+      <br />
+      <label for="note-text">Text</label><br />
+      <textarea id="note-text" name="text" placeholder="Write a note"></textarea>
+      <br />
+      <button type="submit">Submit Note</button>
+    </form>
+  </section>
+
+  {% if result %}
+    <h2>Last Preview</h2>
+    <pre id="preview-output">{{ result | tojson(indent=2) }}</pre>
+  {% else %}
+    <h2>Last Preview</h2>
+    <pre id="preview-output">Submit a document or note to see the preview here.</pre>
+  {% endif %}
+{% endblock %}

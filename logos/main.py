@@ -4,9 +4,11 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Any, Dict
+import pathlib
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .graphio import graph_views
@@ -29,6 +31,9 @@ from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
 from .nlp.extract import extract_all
 
 app = FastAPI()
+templates = Jinja2Templates(
+    directory=str(pathlib.Path(__file__).resolve().parent / "templates")
+)
 PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = {}
 # PREVIEWS is kept for backwards compatibility with existing callers/tests.
 PREVIEWS = PENDING_INTERACTIONS
@@ -47,6 +52,11 @@ class Note(BaseModel):
 
 class AudioPayload(BaseModel):
     source_uri: str = ""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 def _build_interaction_metadata(type_: str, source_uri: str, at: datetime | None = None) -> Dict[str, Any]:
@@ -237,6 +247,34 @@ async def ingest_note(note: Note) -> dict[str, object]:
     )
     preview = _persist_preview(interaction_id, metadata, extraction)
     return {"interaction_id": interaction_id, "preview": preview}
+
+
+@app.post("/ui/ingest/doc")
+async def ui_ingest_doc(request: Request):
+    form = await request.form()
+    payload = {
+        "source_uri": form.get("source_uri") or "",
+        "text": form.get("text") or "",
+    }
+    doc = Doc(**payload)
+    result = await ingest_doc(doc)
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "last_action": "doc", "result": result}
+    )
+
+
+@app.post("/ui/ingest/note")
+async def ui_ingest_note(request: Request):
+    form = await request.form()
+    payload = {
+        "text": form.get("text") or "",
+        "source_uri": form.get("source_uri") or None,
+    }
+    note = Note(**payload)
+    result = await ingest_note(note)
+    return templates.TemplateResponse(
+        "index.html", {"request": request, "last_action": "note", "result": result}
+    )
 
 
 @app.post("/ingest/audio")
