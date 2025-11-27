@@ -352,6 +352,8 @@ async def commit_interaction(interaction_id: str) -> dict[str, str]:
     return {"status": "committed", "interaction_id": interaction_id}
 
 
+# Reports Neo4j availability using graphio.neo4j_client.ping().
+# Returns {"neo4j": "ok"} when reachable or {"neo4j": "down", "reason": "..."}.
 @app.get("/health")
 async def health() -> dict[str, str]:
     try:
