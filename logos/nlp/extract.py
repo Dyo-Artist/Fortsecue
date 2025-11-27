@@ -47,6 +47,24 @@ def _ollama_enabled() -> bool:
     return val in ("1", "true", "yes")
 
 
+def _coerce_json_object(raw_text: str) -> Dict[str, Any]:
+    """Parse JSON even when wrapped in extra text."""
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        pass
+
+    start = raw_text.find("{")
+    end = raw_text.rfind("}")
+
+    if start != -1 and end != -1 and start < end:
+        snippet = raw_text[start : end + 1]
+        return json.loads(snippet)
+
+    raise json.JSONDecodeError("Expecting value", raw_text, 0)
+
+
 def _ollama_extract_all(text: str) -> Dict[str, Any]:
     """
     Ask the LLM to return a structured JSON extraction.
@@ -82,7 +100,7 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
     )
 
     raw_text = call_llm(prompt)
-    data = json.loads(raw_text)
+    data = _coerce_json_object(raw_text)
 
     if not isinstance(data, dict):
         raise ValueError("LLM response is not a JSON object")
