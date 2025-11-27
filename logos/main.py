@@ -277,6 +277,48 @@ async def ui_ingest_note(request: Request):
     )
 
 
+@app.post("/ui/search")
+async def ui_search(request: Request):
+    form = await request.form()
+    q = form.get("q") or ""
+    result = await search(q=q)
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "last_action": "search", "result": result},
+    )
+
+
+@app.post("/ui/graph/ego")
+async def ui_ego_graph(request: Request):
+    form = await request.form()
+    person_id = form.get("person_id") or ""
+    result = await ego_graph(person_id=person_id)
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "last_action": "ego", "result": result},
+    )
+
+
+@app.post("/ui/graph/project")
+async def ui_project_graph(request: Request):
+    form = await request.form()
+    project_id = form.get("project_id") or ""
+    result = await project_graph(project_id=project_id)
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "last_action": "project", "result": result},
+    )
+
+
+@app.post("/ui/alerts")
+async def ui_alerts(request: Request):
+    result = await alerts()
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "last_action": "alerts", "result": result},
+    )
+
+
 @app.post("/ingest/audio")
 async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
     try:

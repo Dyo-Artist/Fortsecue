@@ -27,6 +27,43 @@
     </form>
   </section>
 
+  <section class="section">
+    <h2>Search Entities</h2>
+    <form action="/ui/search" method="post">
+      <label for="search-term">Search</label><br />
+      <input id="search-term" type="text" name="q" placeholder="search term" />
+      <br />
+      <button type="submit">Run Search</button>
+    </form>
+  </section>
+
+  <section class="section">
+    <h2>Ego Graph (Person)</h2>
+    <form action="/ui/graph/ego" method="post">
+      <label for="ego-person">Person ID</label><br />
+      <input id="ego-person" type="text" name="person_id" placeholder="person id" />
+      <br />
+      <button type="submit">Load Ego Graph</button>
+    </form>
+  </section>
+
+  <section class="section">
+    <h2>Project Map</h2>
+    <form action="/ui/graph/project" method="post">
+      <label for="project-id">Project ID</label><br />
+      <input id="project-id" type="text" name="project_id" placeholder="project id" />
+      <br />
+      <button type="submit">Load Project Map</button>
+    </form>
+  </section>
+
+  <section class="section">
+    <h2>Alerts (Unresolved &amp; Sentiment Drop)</h2>
+    <form action="/ui/alerts" method="post">
+      <button type="submit">Fetch Alerts</button>
+    </form>
+  </section>
+
   {% if result %}
     <h2>Last Preview</h2>
     <pre id="preview-output">{{ result | tojson(indent=2) }}</pre>
