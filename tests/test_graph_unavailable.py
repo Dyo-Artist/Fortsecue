@@ -10,7 +10,11 @@ from logos.graphio import neo4j_client
 
 
 def _down(monkeypatch):
-    monkeypatch.setattr(neo4j_client, "_driver", None)
+    def _raise():
+        raise neo4j_client.GraphUnavailable("neo4j_unavailable")
+
+    monkeypatch.setattr(neo4j_client, "_client", None)
+    monkeypatch.setattr(neo4j_client, "_get_client", _raise)
 
 
 def test_health_reports_down_when_no_driver(monkeypatch):
@@ -26,12 +30,14 @@ def test_commit_returns_503_when_graph_down(monkeypatch):
     client = TestClient(main.app)
     main.PENDING_INTERACTIONS["i1"] = {
         "interaction": {
+            "id": "i1",
             "type": "email",
             "at": "2024-01-01T00:00:00",
             "sentiment": 0.0,
             "summary": "hello",
             "source_uri": "uri",
-        }
+        },
+        "entities": {"persons": [], "orgs": []},
     }
     resp = client.post("/commit/i1")
     assert resp.status_code == 503

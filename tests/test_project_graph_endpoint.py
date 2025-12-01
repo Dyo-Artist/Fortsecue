@@ -10,7 +10,11 @@ from logos.graphio import neo4j_client
 
 
 def _down(monkeypatch):
-    monkeypatch.setattr(neo4j_client, "_driver", None)
+    def _raise():
+        raise neo4j_client.GraphUnavailable("neo4j_unavailable")
+
+    monkeypatch.setattr(neo4j_client, "_client", None)
+    monkeypatch.setattr(neo4j_client, "_get_client", _raise)
 
 
 def test_project_graph_returns_503_when_graph_down(monkeypatch):
