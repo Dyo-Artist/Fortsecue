@@ -30,6 +30,24 @@ def test_upsert_org_sets_provenance():
     assert params["now"] == now.isoformat()
 
 
+def test_upsert_org_links_category_to_concept():
+    tx = FakeTx()
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    org = upsert.OrgModel(
+        id="org1",
+        name="Acme",
+        category="org_category_energy",
+        source_uri="uri",
+    )
+
+    upsert.upsert_org(tx, org, now)
+
+    cypher, params = tx.calls[0]
+    assert "INSTANCE_OF" in cypher
+    assert "OPTIONAL MATCH (c:Concept" in cypher
+    assert params["category"] == "org_category_energy"
+
+
 def test_upsert_concept_sets_kind_and_metadata():
     tx = FakeTx()
     now = datetime(2024, 2, 1, tzinfo=timezone.utc)
@@ -62,6 +80,24 @@ def test_upsert_person_with_work_relationship():
     assert "WORKS_FOR" in cypher
     assert params["org_id"] == "org1"
     assert params["now"] == now.isoformat()
+
+
+def test_upsert_person_links_type_to_concept():
+    tx = FakeTx()
+    now = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    person = upsert.PersonModel(
+        id="p1",
+        name="Alice",
+        type="stakeholder_type_community",
+        source_uri="src",
+    )
+
+    upsert.upsert_person(tx, person, person.org_id, now)
+
+    cypher, params = tx.calls[0]
+    assert "INSTANCE_OF" in cypher
+    assert "OPTIONAL MATCH (c:Concept" in cypher
+    assert params["person_type"] == "stakeholder_type_community"
 
 
 def test_upsert_interaction_bundle_orders_entities():
