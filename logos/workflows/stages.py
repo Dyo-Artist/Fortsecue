@@ -138,6 +138,7 @@ def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | No
     extraction_data = dict(bundle.extraction)
     extraction_data.setdefault("summary", bundle.summary)
     extraction_data.setdefault("sentiment", extraction_data.get("sentiment"))
+    reasoning = extraction_data.get("reasoning", []) if isinstance(extraction_data.get("reasoning"), list) else []
 
     metadata = {"type": type_, "at": at_val, "source_uri": source_uri}
     preview = {
@@ -149,6 +150,7 @@ def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | No
         },
         "entities": extraction_data.get("entities", {}),
         "relationships": extraction_data.get("relationships", []),
+        "reasoning": reasoning,
     }
 
     persist_fn = context.get("persist_preview")

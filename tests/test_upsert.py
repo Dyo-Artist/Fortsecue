@@ -235,3 +235,20 @@ def test_upsert_risk_and_outcome_relationships():
     outcome_call = next((params for cypher, params in tx.calls if "MERGE (o:Outcome" in cypher), None)
     assert outcome_call and outcome_call["realised_date"] == "2024-06-15"
     assert outcome_call["risk_ids"] == ["risk1"]
+
+
+def test_upsert_relationship_supports_result_of_with_explanation():
+    tx = FakeTx()
+    now = datetime(2024, 7, 1, tzinfo=timezone.utc)
+    rel = upsert.RelationshipModel(
+        src="risk2", dst="issue2", rel="RESULT_OF", properties={"explanation": "Root cause"}
+    )
+
+    upsert.upsert_relationship(tx, rel, "source://reasoning", now)
+
+    cypher, params = tx.calls[0]
+    assert "RESULT_OF" in cypher
+    assert params["src"] == "risk2"
+    assert params["dst"] == "issue2"
+    assert params["props"]["explanation"] == "Root cause"
+    assert params["now"] == now.isoformat()
