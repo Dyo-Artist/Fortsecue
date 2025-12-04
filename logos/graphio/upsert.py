@@ -24,6 +24,7 @@ class OrgModel(BaseModel):
     name: str | None = None
     domain: str | None = None
     sector: str | None = None
+    category: str | None = None
     source_uri: str | None = None
 
 
@@ -35,6 +36,7 @@ class PersonModel(BaseModel):
     title: str | None = None
     email: str | None = None
     org_id: str | None = None
+    type: str | None = None
     influence_score: float | None = None
     source_uri: str | None = None
 
@@ -168,7 +170,13 @@ def upsert_org(tx, org: OrgModel, now: datetime) -> None:
     cypher = (
         "MERGE (o:Org {id: $id}) "
         "SET o.name = $name, o.domain = $domain, o.sector = $sector, "
-        "o.source_uri = $source_uri, o.last_seen = datetime($now)"
+        "o.category = $category, o.source_uri = $source_uri, o.last_seen = datetime($now) "
+        "WITH o "
+        "OPTIONAL MATCH (c:Concept) WHERE c.id = $category OR c.name = $category "
+        "FOREACH (_ IN CASE WHEN c IS NULL THEN [] ELSE [1] END | "
+        "    MERGE (o)-[r:INSTANCE_OF]->(c) "
+        "    SET r.source_uri = $source_uri, r.last_seen = datetime($now)"
+        ")"
     )
     tx.run(
         cypher,
@@ -177,6 +185,7 @@ def upsert_org(tx, org: OrgModel, now: datetime) -> None:
             "name": org.name or org.id,
             "domain": org.domain,
             "sector": org.sector,
+            "category": org.category,
             "source_uri": org.source_uri,
             "now": _dt_param(now),
         },
@@ -187,12 +196,18 @@ def upsert_person(tx, person: PersonModel, org_id: str | None, now: datetime) ->
     cypher = (
         "MERGE (p:Person {id: $id}) "
         "SET p.name = $name, p.title = $title, p.email = $email, p.org_id = $org_id, "
-        "p.influence_score = $influence_score, p.source_uri = $source_uri, p.last_seen = datetime($now) "
+        "p.type = $person_type, p.influence_score = $influence_score, p.source_uri = $source_uri, p.last_seen = datetime($now) "
         "WITH p "
         "OPTIONAL MATCH (o:Org {id: $org_id}) "
         "FOREACH (_ IN CASE WHEN o IS NULL THEN [] ELSE [1] END | "
         "    MERGE (p)-[r:WORKS_FOR]->(o) "
         "    SET r.source_uri = $source_uri, r.last_seen = datetime($now)"
+        ") "
+        "WITH p "
+        "OPTIONAL MATCH (c:Concept) WHERE c.id = $person_type OR c.name = $person_type "
+        "FOREACH (_ IN CASE WHEN c IS NULL THEN [] ELSE [1] END | "
+        "    MERGE (p)-[rc:INSTANCE_OF]->(c) "
+        "    SET rc.source_uri = $source_uri, rc.last_seen = datetime($now)"
         ")"
     )
     tx.run(
@@ -203,6 +218,7 @@ def upsert_person(tx, person: PersonModel, org_id: str | None, now: datetime) ->
             "title": person.title,
             "email": person.email,
             "org_id": org_id,
+            "person_type": person.type,
             "influence_score": person.influence_score,
             "source_uri": person.source_uri,
             "now": _dt_param(now),
