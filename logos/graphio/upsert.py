@@ -41,6 +41,17 @@ class PersonModel(BaseModel):
     source_uri: str | None = None
 
 
+class AgentModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str | None = None
+    role: str | None = None
+    source_uri: str | None = None
+    created_by: str | None = None
+    updated_by: str | None = None
+
+
 class ProjectModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -276,6 +287,41 @@ def upsert_person(tx, person: PersonModel, org_id: str | None, now: datetime) ->
             "person_type": person.type,
             "influence_score": person.influence_score,
             "source_uri": person.source_uri,
+        "now": _dt_param(now),
+    },
+    )
+
+
+def upsert_agent_assist(tx, agent: AgentModel, user: PersonModel, now: datetime) -> None:
+    cypher = (
+        "MERGE (a:Agent {id: $agent_id}) "
+        "SET a.name = $agent_name, a.role = $agent_role, a.source_uri = $source_uri, "
+        "a.created_by = coalesce(a.created_by, $actor_id), a.updated_by = $actor_id, "
+        "a.created_at = coalesce(a.created_at, datetime($now)), a.updated_at = datetime($now), "
+        "a.first_seen_at = coalesce(a.first_seen_at, datetime($now)), a.last_seen_at = datetime($now) "
+        "WITH a "
+        "MERGE (u:Person {id: $user_id}) "
+        "ON CREATE SET u.name = $user_name, u.source_uri = $source_uri, "
+        "u.created_by = $actor_id, u.updated_by = $actor_id, "
+        "u.created_at = datetime($now), u.updated_at = datetime($now), "
+        "u.first_seen_at = datetime($now), u.last_seen_at = datetime($now) "
+        "ON MATCH SET u.updated_at = datetime($now), u.last_seen_at = datetime($now), u.updated_by = $actor_id "
+        "MERGE (a)-[r:ASSISTS]->(u) "
+        "SET r.source_uri = $source_uri, r.created_by = coalesce(r.created_by, $actor_id), "
+        "r.updated_by = $actor_id, r.created_at = coalesce(r.created_at, datetime($now)), "
+        "r.updated_at = datetime($now), r.first_seen_at = coalesce(r.first_seen_at, datetime($now)), "
+        "r.last_seen_at = datetime($now)"
+    )
+    tx.run(
+        cypher,
+        {
+            "agent_id": agent.id,
+            "agent_name": agent.name or agent.id,
+            "agent_role": agent.role,
+            "user_id": user.id,
+            "user_name": user.name or user.id,
+            "source_uri": agent.source_uri or user.source_uri,
+            "actor_id": agent.updated_by or agent.created_by or agent.id,
             "now": _dt_param(now),
         },
     )
