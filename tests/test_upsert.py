@@ -30,6 +30,27 @@ def test_upsert_org_sets_provenance():
     assert params["now"] == now.isoformat()
 
 
+def test_upsert_concept_sets_kind_and_metadata():
+    tx = FakeTx()
+    now = datetime(2024, 2, 1, tzinfo=timezone.utc)
+    concept = upsert.ConceptModel(
+        id="stakeholder_type_community",
+        kind="StakeholderType",
+        name="Community",
+        metadata={"priority": "high"},
+        source_uri="src",
+    )
+
+    upsert.upsert_concept(tx, concept, now)
+
+    cypher, params = tx.calls[0]
+    assert "MERGE (c:Concept" in cypher
+    assert params["id"] == "stakeholder_type_community"
+    assert params["kind"] == "StakeholderType"
+    assert params["metadata"] == {"priority": "high"}
+    assert params["now"] == now.isoformat()
+
+
 def test_upsert_person_with_work_relationship():
     tx = FakeTx()
     now = datetime(2024, 1, 2, tzinfo=timezone.utc)
@@ -56,6 +77,9 @@ def test_upsert_interaction_bundle_orders_entities():
             source_uri="src",
         ),
         entities=upsert.EntitiesModel(
+            stakeholder_types=[upsert.ConceptModel(id="st1", kind="StakeholderType", name="Community")],
+            risk_categories=[upsert.ConceptModel(id="rc1", kind="RiskCategory", name="Safety")],
+            topic_groups=[upsert.ConceptModel(id="tg1", kind="TopicGroup", name="Operations")],
             orgs=[upsert.OrgModel(id="org1", name="Acme")],
             persons=[upsert.PersonModel(id="p1", name="Alice", org_id="org1")],
             projects=[upsert.ProjectModel(id="pr1", name="Proj")],
@@ -78,8 +102,12 @@ def test_upsert_interaction_bundle_orders_entities():
 
     upsert.upsert_interaction_bundle(tx, bundle, now)
 
-    assert len(tx.calls) >= 7
-    assert tx.calls[0][1]["id"] == "org1"  # orgs first
-    assert tx.calls[1][1]["id"] == "p1"  # persons next
+    assert len(tx.calls) >= 10
+    assert "Concept" in tx.calls[0][0]
+    assert tx.calls[0][1]["kind"] == "StakeholderType"
+    org_call = next((params for cypher, params in tx.calls if "MERGE (o:Org" in cypher), None)
+    assert org_call and org_call["id"] == "org1"
+    person_call = next((params for cypher, params in tx.calls if "MERGE (p:Person" in cypher), None)
+    assert person_call and person_call["id"] == "p1"
     assert any("MENTIONS" in call[0] for call in tx.calls)
     assert any("INVOLVED_IN" in call[0] for call in tx.calls)

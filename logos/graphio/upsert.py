@@ -6,6 +6,17 @@ from typing import Any, Iterable, Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ConceptModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    kind: str
+    name: str | None = None
+    description: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_uri: str | None = None
+
+
 class OrgModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -97,6 +108,9 @@ class RelationshipModel(BaseModel):
 class EntitiesModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    stakeholder_types: list[ConceptModel] = Field(default_factory=list)
+    risk_categories: list[ConceptModel] = Field(default_factory=list)
+    topic_groups: list[ConceptModel] = Field(default_factory=list)
     orgs: list[OrgModel] = Field(default_factory=list)
     persons: list[PersonModel] = Field(default_factory=list)
     projects: list[ProjectModel] = Field(default_factory=list)
@@ -128,6 +142,26 @@ def _dt_param(value: datetime) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+def upsert_concept(tx, concept: ConceptModel, now: datetime) -> None:
+    cypher = (
+        "MERGE (c:Concept {id: $id}) "
+        "SET c.name = $name, c.kind = $kind, c.description = $description, "
+        "c.metadata = $metadata, c.source_uri = $source_uri, c.last_seen = datetime($now)"
+    )
+    tx.run(
+        cypher,
+        {
+            "id": concept.id,
+            "name": concept.name or concept.id,
+            "kind": concept.kind,
+            "description": concept.description,
+            "metadata": concept.metadata or {},
+            "source_uri": concept.source_uri,
+            "now": _dt_param(now),
+        },
+    )
 
 
 def upsert_org(tx, org: OrgModel, now: datetime) -> None:
@@ -335,6 +369,14 @@ def upsert_relationship(tx, rel: RelationshipModel, source_uri: str, now: dateti
 
 def upsert_interaction_bundle(tx, bundle: InteractionBundle, now: datetime) -> None:
     source_uri = bundle.interaction.source_uri
+
+    for concept in (
+        bundle.entities.stakeholder_types
+        + bundle.entities.risk_categories
+        + bundle.entities.topic_groups
+    ):
+        concept.source_uri = concept.source_uri or source_uri
+        upsert_concept(tx, concept, now)
 
     for org in bundle.entities.orgs:
         org.source_uri = org.source_uri or source_uri

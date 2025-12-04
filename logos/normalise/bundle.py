@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable
 from logos.graphio.upsert import (
     CommitmentModel,
     ContractModel,
+    ConceptModel,
     EntitiesModel,
     InteractionBundle,
     InteractionModel,
@@ -81,6 +82,18 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
         ContractModel.model_validate(item)
         for item in _normalise_entity_list(entities_raw.get("contracts", []), name_field="name")
     ]
+    stakeholder_types = [
+        ConceptModel.model_validate(dict(item, kind="StakeholderType"))
+        for item in _normalise_entity_list(entities_raw.get("stakeholder_types", []), name_field="name")
+    ]
+    risk_categories = [
+        ConceptModel.model_validate(dict(item, kind="RiskCategory"))
+        for item in _normalise_entity_list(entities_raw.get("risk_categories", []), name_field="name")
+    ]
+    topic_groups = [
+        ConceptModel.model_validate(dict(item, kind="TopicGroup"))
+        for item in _normalise_entity_list(entities_raw.get("topic_groups", []), name_field="name")
+    ]
     topics = [
         TopicModel.model_validate(item)
         for item in _normalise_entity_list(entities_raw.get("topics", []), name_field="name")
@@ -102,6 +115,9 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
     ]
 
     entities = EntitiesModel(
+        stakeholder_types=stakeholder_types,
+        risk_categories=risk_categories,
+        topic_groups=topic_groups,
         orgs=orgs,
         persons=persons,
         projects=projects,
