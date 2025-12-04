@@ -114,3 +114,27 @@ def test_extract_all_falls_back_when_prompt_missing(monkeypatch, tmp_path):
     result = extract_mod.extract_all(text)
 
     assert "Acme Pty Ltd" in result["entities"]["orgs"]
+
+
+def test_commitment_patterns_loaded_from_lexicon(monkeypatch, tmp_path):
+    lexicon = tmp_path / "obligation_phrases.yml"
+    lexicon.write_text(
+        """patterns:
+  - regex: '\\bobligated to\\b[^.]+'
+    flags:
+      - IGNORECASE
+""",
+        encoding="utf-8",
+    )
+
+    original_path = extract_mod.OBLIGATION_LEXICON_PATH
+    monkeypatch.setattr(extract_mod, "OBLIGATION_LEXICON_PATH", lexicon)
+
+    extract_mod._refresh_obligation_patterns()
+
+    text = "Contoso is obligated to deliver the new components by Monday."
+    result = extract_mod.extract_all(text)
+
+    assert "obligated to deliver the new components by Monday" in result["entities"]["commitments"]
+
+    extract_mod._refresh_obligation_patterns(original_path)
