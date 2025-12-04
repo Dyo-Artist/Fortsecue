@@ -1,0 +1,4 @@
+ingest_preview:
+  - logos.workflows.stages.require_raw_input
+  - logos.workflows.stages.tokenise_text
+  - logos.workflows.stages.build_preview_bundle
