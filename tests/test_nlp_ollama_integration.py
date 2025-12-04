@@ -97,3 +97,20 @@ def test_extract_all_respects_disabled_flags(monkeypatch, flag):
 
     extract_mod.extract_all("Sample text")
     assert called is False
+
+
+def test_extract_all_falls_back_when_prompt_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOGOS_USE_OLLAMA", "1")
+
+    missing_prompt = tmp_path / "absent.yml"
+    monkeypatch.setattr(extract_mod, "PROMPT_PATH", missing_prompt)
+
+    def raising_call(prompt: str) -> str:  # noqa: ARG001
+        raise AssertionError("call_llm should not be invoked when prompt is missing")
+
+    monkeypatch.setattr(extract_mod, "call_llm", raising_call)
+
+    text = "Alice works at Acme Pty Ltd and will deliver by Friday."
+    result = extract_mod.extract_all(text)
+
+    assert "Acme Pty Ltd" in result["entities"]["orgs"]

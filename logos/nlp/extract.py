@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
+import yaml
+from jinja2 import Template, TemplateError
+
 from logos.interfaces.ollama_client import OllamaError, call_llm
+
+PROMPT_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "prompts" / "extraction_interaction.yml"
 
 _PERSON_PATTERN = re.compile(r"\b([A-Z][a-z]+ [A-Z][a-z]+)\b")
 _ORG_PATTERN = re.compile(
@@ -47,6 +53,56 @@ def _ollama_enabled() -> bool:
     return val in ("1", "true", "yes")
 
 
+class PromptConfigError(RuntimeError):
+    """Raised when the extraction prompt is missing or cannot be rendered."""
+
+
+def _load_extraction_prompt(prompt_path: Path | None = None) -> Dict[str, Any]:
+    """Load the extraction prompt YAML configuration."""
+
+    path = prompt_path or PROMPT_PATH
+
+    if not path.exists():
+        raise PromptConfigError(f"Prompt file not found at {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            data = yaml.safe_load(file) or {}
+    except yaml.YAMLError as exc:  # pragma: no cover - yaml parser error handling
+        raise PromptConfigError("Failed to parse extraction prompt YAML") from exc
+
+    if not isinstance(data, dict):
+        raise PromptConfigError("Extraction prompt YAML must be a mapping")
+
+    return data
+
+
+def _render_extraction_prompt(text: str, prompt_path: Path | None = None) -> str:
+    """Render the extraction prompt template using Jinja2."""
+
+    data = _load_extraction_prompt(prompt_path)
+
+    template_text = data.get("template")
+    if not isinstance(template_text, str) or not template_text.strip():
+        raise PromptConfigError("Extraction prompt template is missing or empty")
+
+    context = {
+        "text": text,
+        "stakeholder_type_list": "",
+        "risk_category_list": "",
+        "topic_list": "",
+    }
+
+    context_defaults = data.get("context_defaults")
+    if isinstance(context_defaults, dict):
+        context.update(context_defaults)
+
+    try:
+        return Template(template_text).render(**context)
+    except TemplateError as exc:
+        raise PromptConfigError("Failed to render extraction prompt template") from exc
+
+
 def _coerce_json_object(raw_text: str) -> Dict[str, Any]:
     """Parse JSON even when wrapped in extra text."""
 
@@ -77,27 +133,7 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
         If the LLM response does not include expected keys.
     """
 
-    prompt = (
-        "You are LOGOS, an information extraction system. "
-        "Given the input text, extract entities, relationships, sentiment, and summary. "
-        "Respond with ONLY valid JSON following this schema and nothing else. "
-        "Ensure all IDs are strings. Summary must be at most 140 characters.\n"
-        "Input text:\n" + text + "\n"
-        "Return JSON with this exact structure:\n"
-        "{\n"
-        "  \"entities\": {\n"
-        "    \"persons\": [ { \"id\": \"p_...\", \"name\": \"...\", \"org_id\": \"o_acme\" } ],\n"
-        "    \"orgs\": [ { \"id\": \"o_acme\", \"name\": \"Acme Pty Ltd\" } ],\n"
-        "    \"projects\": [ { \"id\": \"pr_...\", \"name\": \"...\", \"status\": \"active\" } ],\n"
-        "    \"contracts\": [ { \"id\": \"ct_...\", \"name\": \"...\", \"sap_id\": \"...\", \"value\": 12345.0, \"start_date\": \"YYYY-MM-DD\", \"end_date\": \"YYYY-MM-DD\" } ],\n"
-        "    \"topics\": [ { \"id\": \"t_...\", \"name\": \"security\" } ],\n"
-        "    \"commitments\": [ { \"id\": \"c_...\", \"text\": \"...\", \"person_id\": \"p_...\", \"due_date\": \"YYYY-MM-DD\", \"status\": \"open\", \"relates_to_project_id\": \"pr_...\", \"relates_to_contract_id\": \"ct_...\" } ]\n"
-        "  },\n"
-        "  \"relationships\": [ { \"src\": \"...\", \"dst\": \"...\", \"rel\": \"...\" } ],\n"
-        "  \"sentiment\": 0.0,\n"
-        "  \"summary\": \"Short summary here, max 140 characters.\"\n"
-        "}"
-    )
+    prompt = _render_extraction_prompt(text)
 
     raw_text = call_llm(prompt)
     data = _coerce_json_object(raw_text)
@@ -129,7 +165,7 @@ def extract_all(text: str) -> Dict[str, Any]:
     if _ollama_enabled():
         try:
             return _ollama_extract_all(text)
-        except (OllamaError, json.JSONDecodeError, ValueError, KeyError):
+        except (OllamaError, json.JSONDecodeError, ValueError, KeyError, PromptConfigError):
             return _regex_extract_all(text)
 
     return _regex_extract_all(text)
