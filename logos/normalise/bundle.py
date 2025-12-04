@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping
 
 from logos.graphio.upsert import (
     CommitmentModel,
@@ -57,6 +57,48 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except Exception:
         return None
+
+
+_REASONING_REL_TYPES = {"RESULT_OF", "RELATED_TO", "INFLUENCES"}
+
+
+def _build_reasoning_relationships(entries: Iterable[Mapping[str, Any]]) -> list[RelationshipModel]:
+    """Convert extracted reasoning entries into RelationshipModel instances."""
+
+    relationships: list[RelationshipModel] = []
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+
+        rel = (entry.get("relation") or entry.get("rel") or "").upper()
+        if rel not in _REASONING_REL_TYPES:
+            continue
+
+        src = entry.get("source") or entry.get("src") or entry.get("from")
+        dst = entry.get("target") or entry.get("dst") or entry.get("to")
+        if not src or not dst:
+            continue
+
+        props: dict[str, Any] = {}
+        if isinstance(entry.get("properties"), Mapping):
+            props.update(entry["properties"])
+
+        explanation = entry.get("explanation") or entry.get("why") or entry.get("because")
+        if explanation:
+            props.setdefault("explanation", explanation)
+
+        relationships.append(
+            RelationshipModel(
+                src=str(src),
+                dst=str(dst),
+                rel=rel,
+                src_label=entry.get("source_label") or entry.get("src_label"),
+                dst_label=entry.get("target_label") or entry.get("dst_label"),
+                properties=props or None,
+            )
+        )
+
+    return relationships
 
 
 def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> InteractionBundle:
@@ -132,11 +174,12 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
     ]
 
     relationships_raw = preview.get("relationships", []) if isinstance(preview, dict) else []
+    reasoning_relationships = _build_reasoning_relationships(preview.get("reasoning", []) if isinstance(preview, dict) else [])
     relationships = [
         RelationshipModel.model_validate(rel)
         for rel in relationships_raw
         if isinstance(rel, dict) and rel.get("src") and rel.get("dst") and rel.get("rel")
-    ]
+    ] + reasoning_relationships
 
     entities = EntitiesModel(
         stakeholder_types=stakeholder_types,
