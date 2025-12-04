@@ -84,6 +84,53 @@ class CommitmentModel(BaseModel):
     source_uri: str | None = None
 
 
+class IssueModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    category: str | None = None
+    status: str | None = None
+    severity: str | None = None
+    relates_to_project_ids: list[str] = Field(default_factory=list)
+    relates_to_topic_ids: list[str] = Field(default_factory=list)
+    related_risk_ids: list[str] = Field(default_factory=list)
+    raised_in_interaction_id: str | None = None
+    source_uri: str | None = None
+
+
+class RiskModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    category: str | None = None
+    likelihood: str | float | None = None
+    impact: str | float | None = None
+    score: float | None = None
+    status: str | None = None
+    relates_to_project_ids: list[str] = Field(default_factory=list)
+    relates_to_topic_ids: list[str] = Field(default_factory=list)
+    results_in_outcome_ids: list[str] = Field(default_factory=list)
+    identified_in_interaction_id: str | None = None
+    source_uri: str | None = None
+
+
+class OutcomeModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    title: str | None = None
+    description: str | None = None
+    type: str | None = None
+    realised_date: date | None = None
+    associated_project_ids: list[str] = Field(default_factory=list)
+    results_from_risk_ids: list[str] = Field(default_factory=list)
+    source_uri: str | None = None
+
+
 class InteractionModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -119,6 +166,9 @@ class EntitiesModel(BaseModel):
     contracts: list[ContractModel] = Field(default_factory=list)
     topics: list[TopicModel] = Field(default_factory=list)
     commitments: list[CommitmentModel] = Field(default_factory=list)
+    issues: list[IssueModel] = Field(default_factory=list)
+    risks: list[RiskModel] = Field(default_factory=list)
+    outcomes: list[OutcomeModel] = Field(default_factory=list)
 
 
 class InteractionBundle(BaseModel):
@@ -137,6 +187,11 @@ _ALLOWED_RELATIONSHIPS = {
     "PARTY_TO",
     "MENTIONS",
     "INFLUENCES",
+    "RELATED_TO",
+    "RAISED_IN",
+    "IDENTIFIED_IN",
+    "RESULTS_IN",
+    "ASSOCIATED_WITH",
 }
 
 
@@ -330,6 +385,158 @@ def upsert_commitment(
     )
 
 
+def upsert_issue(tx, issue: IssueModel, now: datetime) -> None:
+    cypher = (
+        "MERGE (i:Issue {id: $id}) "
+        "SET i.title = $title, i.description = $description, i.category = $category, "
+        "i.status = $status, i.severity = $severity, i.source_uri = $source_uri, i.last_seen = datetime($now) "
+        "WITH i "
+        "FOREACH (pid IN $project_ids | "
+        "    OPTIONAL MATCH (p:Project {id: pid}) "
+        "    FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (i)-[rp:RELATED_TO]->(p) "
+        "        SET rp.source_uri = $source_uri, rp.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH i "
+        "FOREACH (tid IN $topic_ids | "
+        "    OPTIONAL MATCH (t:Topic {id: tid}) "
+        "    FOREACH (_ IN CASE WHEN t IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (i)-[rt:RELATED_TO]->(t) "
+        "        SET rt.source_uri = $source_uri, rt.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH i "
+        "FOREACH (rid IN $risk_ids | "
+        "    OPTIONAL MATCH (rk:Risk {id: rid}) "
+        "    FOREACH (_ IN CASE WHEN rk IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (i)-[rr:RELATED_TO]->(rk) "
+        "        SET rr.source_uri = $source_uri, rr.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH i "
+        "OPTIONAL MATCH (inter:Interaction {id: $raised_in}) "
+        "FOREACH (_ IN CASE WHEN inter IS NULL THEN [] ELSE [1] END | "
+        "    MERGE (i)-[ri:RAISED_IN]->(inter) "
+        "    SET ri.source_uri = $source_uri, ri.last_seen = datetime($now)"
+        ")"
+    )
+    tx.run(
+        cypher,
+        {
+            "id": issue.id,
+            "title": issue.title or issue.id,
+            "description": issue.description,
+            "category": issue.category,
+            "status": issue.status,
+            "severity": issue.severity,
+            "source_uri": issue.source_uri,
+            "project_ids": list(issue.relates_to_project_ids),
+            "topic_ids": list(issue.relates_to_topic_ids),
+            "risk_ids": list(issue.related_risk_ids),
+            "raised_in": issue.raised_in_interaction_id,
+            "now": _dt_param(now),
+        },
+    )
+
+
+def upsert_risk(tx, risk: RiskModel, now: datetime) -> None:
+    cypher = (
+        "MERGE (r:Risk {id: $id}) "
+        "SET r.title = $title, r.description = $description, r.category = $category, "
+        "r.likelihood = $likelihood, r.impact = $impact, r.score = $score, r.status = $status, "
+        "r.source_uri = $source_uri, r.last_seen = datetime($now) "
+        "WITH r "
+        "FOREACH (pid IN $project_ids | "
+        "    OPTIONAL MATCH (p:Project {id: pid}) "
+        "    FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (r)-[rp:RELATED_TO]->(p) "
+        "        SET rp.source_uri = $source_uri, rp.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH r "
+        "FOREACH (tid IN $topic_ids | "
+        "    OPTIONAL MATCH (t:Topic {id: tid}) "
+        "    FOREACH (_ IN CASE WHEN t IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (r)-[rt:RELATED_TO]->(t) "
+        "        SET rt.source_uri = $source_uri, rt.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH r "
+        "FOREACH (oid IN $outcome_ids | "
+        "    OPTIONAL MATCH (o:Outcome {id: oid}) "
+        "    FOREACH (_ IN CASE WHEN o IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (r)-[ro:RESULTS_IN]->(o) "
+        "        SET ro.source_uri = $source_uri, ro.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH r "
+        "OPTIONAL MATCH (inter:Interaction {id: $identified_in}) "
+        "FOREACH (_ IN CASE WHEN inter IS NULL THEN [] ELSE [1] END | "
+        "    MERGE (r)-[ri:IDENTIFIED_IN]->(inter) "
+        "    SET ri.source_uri = $source_uri, ri.last_seen = datetime($now)"
+        ")"
+    )
+    tx.run(
+        cypher,
+        {
+            "id": risk.id,
+            "title": risk.title or risk.id,
+            "description": risk.description,
+            "category": risk.category,
+            "likelihood": risk.likelihood,
+            "impact": risk.impact,
+            "score": risk.score,
+            "status": risk.status,
+            "source_uri": risk.source_uri,
+            "project_ids": list(risk.relates_to_project_ids),
+            "topic_ids": list(risk.relates_to_topic_ids),
+            "outcome_ids": list(risk.results_in_outcome_ids),
+            "identified_in": risk.identified_in_interaction_id,
+            "now": _dt_param(now),
+        },
+    )
+
+
+def upsert_outcome(tx, outcome: OutcomeModel, now: datetime) -> None:
+    cypher = (
+        "MERGE (o:Outcome {id: $id}) "
+        "SET o.title = $title, o.description = $description, o.type = $type, "
+        "o.realised_date = CASE WHEN $realised_date IS NULL THEN NULL ELSE date($realised_date) END, "
+        "o.source_uri = $source_uri, o.last_seen = datetime($now) "
+        "WITH o "
+        "FOREACH (pid IN $project_ids | "
+        "    OPTIONAL MATCH (p:Project {id: pid}) "
+        "    FOREACH (_ IN CASE WHEN p IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (o)-[ra:ASSOCIATED_WITH]->(p) "
+        "        SET ra.source_uri = $source_uri, ra.last_seen = datetime($now)"
+        "    )"
+        ") "
+        "WITH o "
+        "FOREACH (rid IN $risk_ids | "
+        "    OPTIONAL MATCH (r:Risk {id: rid}) "
+        "    FOREACH (_ IN CASE WHEN r IS NULL THEN [] ELSE [1] END | "
+        "        MERGE (r)-[rr:RESULTS_IN]->(o) "
+        "        SET rr.source_uri = $source_uri, rr.last_seen = datetime($now)"
+        "    )"
+        ")"
+    )
+    tx.run(
+        cypher,
+        {
+            "id": outcome.id,
+            "title": outcome.title or outcome.id,
+            "description": outcome.description,
+            "type": outcome.type,
+            "realised_date": outcome.realised_date.isoformat() if outcome.realised_date else None,
+            "source_uri": outcome.source_uri,
+            "project_ids": list(outcome.associated_project_ids),
+            "risk_ids": list(outcome.results_from_risk_ids),
+            "now": _dt_param(now),
+        },
+    )
+
+
 def upsert_interaction(
     tx,
     interaction: InteractionModel,
@@ -423,6 +630,18 @@ def upsert_interaction_bundle(tx, bundle: InteractionBundle, now: datetime) -> N
             commitment.relates_to_project_id,
             now,
         )
+
+    for risk in bundle.entities.risks:
+        risk.source_uri = risk.source_uri or source_uri
+        upsert_risk(tx, risk, now)
+
+    for outcome in bundle.entities.outcomes:
+        outcome.source_uri = outcome.source_uri or source_uri
+        upsert_outcome(tx, outcome, now)
+
+    for issue in bundle.entities.issues:
+        issue.source_uri = issue.source_uri or source_uri
+        upsert_issue(tx, issue, now)
 
     mention_ids = [
         rel.dst
