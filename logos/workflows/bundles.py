@@ -36,4 +36,5 @@ class ExtractionBundle(PipelineBundle):
     summary: str = ""
     source_uri: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    extraction: Dict[str, Any] = Field(default_factory=dict)
 

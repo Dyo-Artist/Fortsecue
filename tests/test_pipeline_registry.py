@@ -1,5 +1,4 @@
 from logos.workflows import (
-    ExtractionBundle,
     PipelineConfigError,
     PipelineNotFound,
     RawInputBundle,
@@ -14,23 +13,32 @@ def test_load_pipeline_config_reads_yaml_registry():
     assert pipelines["ingest_preview"] == [
         "logos.workflows.stages.require_raw_input",
         "logos.workflows.stages.tokenise_text",
-        "logos.workflows.stages.build_preview_bundle",
+        "logos.workflows.stages.apply_extraction",
+        "logos.workflows.stages.build_preview_payload",
+    ]
+    assert pipelines["commit_interaction"] == [
+        "logos.workflows.stages.require_preview_payload",
+        "logos.workflows.stages.build_interaction_bundle_stage",
+        "logos.workflows.stages.upsert_interaction_bundle_stage",
     ]
 
 
 def test_run_pipeline_executes_stages_in_order():
-    context: dict[str, object] = {}
+    context: dict[str, object] = {"interaction_id": "test1", "interaction_type": "document"}
     raw_bundle = RawInputBundle(text="Alice meets Bob about project Apollo", source_uri="memo-001")
 
     result = run_pipeline("ingest_preview", raw_bundle, context)
 
-    assert isinstance(result, ExtractionBundle)
-    assert result.text == raw_bundle.text
-    assert result.tokens[:2] == ["Alice", "meets"]
+    assert isinstance(result, dict)
+    assert result["interaction"]["id"] == "test1"
+    assert result["interaction"]["type"] == "document"
+    assert result["interaction"]["summary"]
+    assert result["entities"]
     assert context.get("trace") == [
         "require_raw_input",
         "tokenise_text",
-        "build_preview_bundle",
+        "apply_extraction",
+        "build_preview_payload",
     ]
 
 
