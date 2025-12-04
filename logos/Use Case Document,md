@@ -1,0 +1,363 @@
+Use Case Document
+Product: LOGOS – Cognitive Engine + Stakeholder Engagement MVP
+________________________________________
+1. Introduction
+1.1 Purpose
+This document describes the primary use cases for:
+•	LOGOS Core (the cognitive engine and shared AI pipelines), and
+•	The Stakeholder Engagement MVP that runs on LOGOS Core.
+It focuses on user-visible behaviour and interactions with the system; technical design details are covered in the SRS, AI Model Design, and SAD.
+1.2 Scope
+Use cases in scope:
+•	Ingesting and processing stakeholder interactions (documents, audio, notes).
+•	Reviewing and committing extracted data into the LOGOS graph.
+•	Searching and exploring stakeholders, projects, and commitments.
+•	Managing commitments and viewing alerts.
+•	Viewing project maps and stakeholder networks.
+•	Basic configuration and operations relevant to MVP.
+Advanced modules (ESG analytics, governance workflows, predictive modelling, etc.) are out of scope for this version but should be supported by the same patterns.
+________________________________________
+2. Actors
+Actor	Description
+Business User	Category Manager, Project Lead, Analyst. Regularly ingests interactions, manages commitments.
+Executive Viewer	Senior manager/executive. Mainly views dashboards, stakeholder profiles, and alerts.
+System Administrator	Technical user. Installs, configures, and maintains LOGOS and Neo4j.
+Data/AI Engineer	Extends pipelines, tunes models, maintains knowledgebase/prompts and domain profiles.
+LOGOS Core (System)	Internal system actor representing pipelines, graph store, and reasoning engine.
+Local AI Services	External system actors: local LLM, ASR, OCR (optional, via HTTP).
+For most use cases, the Primary Actor is the Business User.
+________________________________________
+3. Use Case List
+UC01 – Ingest Stakeholder Interaction from Document
+UC02 – Ingest Stakeholder Interaction from Audio
+UC03 – Ingest Stakeholder Interaction via Free-text Note
+UC04 – Review and Confirm Extracted Data (Preview & Commit)
+UC05 – Search for Stakeholder, Project, or Commitment
+UC06 – View Stakeholder 360° Profile
+UC07 – Manage Commitments (Filter, Update Status)
+UC08 – View Alerts and Risk Signals
+UC09 – View Project Map and Stakeholder Network
+UC10 – Configure Domain Profile / Knowledgebase (Admin/Engineer)
+UC11 – Agent-Assisted Summary and Briefing (Future-facing, optional in MVP UI)
+________________________________________
+4. Detailed Use Cases
+________________________________________
+UC01 – Ingest Stakeholder Interaction from Document
+Primary Actor: Business User
+Goal: Convert meeting notes or correspondence (DOCX/PDF/TXT/CSV) into structured interactions, stakeholders, commitments, and issues.
+Preconditions:
+•	LOGOS is running and accessible via UI.
+•	User has a document containing stakeholder-related content.
+•	User is authenticated (if auth is enabled).
+Postconditions (on success):
+•	A new provisional Interaction exists in staging with extracted entities and relationships.
+•	User can see a preview and proceed to UC04.
+Main Success Scenario:
+1.	User opens the “Upload Interaction” screen.
+2.	User selects and uploads a document (DOCX/PDF/TXT/CSV).
+3.	System validates file type and size.
+4.	System stores the file in staging and creates a temporary interaction_id.
+5.	System extracts text from the document.
+6.	System passes text to LOGOS Core NLP pipeline.
+7.	LOGOS Core returns an extraction bundle (stakeholders, commitments, issues, sentiment, topics).
+8.	System runs normalisation/entity resolution against existing graph.
+9.	System stores a preview bundle linked to interaction_id.
+10.	System notifies user that a preview is ready and opens the preview view (UC04).
+Extensions / Alternatives:
+•	3a. Unsupported file type
+o	3a1. System rejects the file with a clear error and supported types list.
+•	5a. Text extraction fails (e.g. corrupted file)
+o	5a1. System flags error and logs details.
+o	5a2. User is prompted to upload a different file or paste text (UC03).
+•	7a. NLP pipeline unavailable (temporary failure)
+o	7a1. System shows error and leaves interaction in “failed” state.
+o	7a2. User can retry later.
+Frequency of Use: Daily, multiple times per user.
+________________________________________
+UC02 – Ingest Stakeholder Interaction from Audio
+Primary Actor: Business User
+Goal: Convert recorded meetings or calls (audio files) into structured interactions.
+Preconditions:
+•	LOGOS is running and configured with a local ASR service or stub.
+•	User has an audio recording they are permitted to use.
+Postconditions:
+•	A new provisional Interaction with transcript and extracted entities/relationships exists in staging.
+•	User can proceed to UC04.
+Main Success Scenario:
+1.	User opens “Upload Audio” screen.
+2.	User uploads an audio file (e.g. WAV, MP3).
+3.	System validates file type and size.
+4.	System stores audio file and creates interaction_id.
+5.	System sends audio to local ASR service.
+6.	ASR returns transcript text.
+7.	System passes transcript to NLP pipeline (same as UC01 steps 7–9).
+8.	System saves preview bundle for interaction_id.
+9.	System opens preview (UC04).
+Extensions:
+•	5a. ASR service unavailable or times out
+o	5a1. System logs error and notifies user.
+o	5a2. User may download transcript error log or try again later.
+•	6a. Transcript is low quality
+o	6a1. User can manually edit transcript in preview before confirmation (UC04).
+Frequency: Less frequent than document ingestion but important for meeting-heavy teams.
+________________________________________
+UC03 – Ingest Stakeholder Interaction via Free-text Note
+Primary Actor: Business User
+Goal: Quickly capture a stakeholder interaction or idea directly into LOGOS as text.
+Preconditions:
+•	User has access to LOGOS UI.
+Postconditions:
+•	Provisional Interaction with provided text and extracted structure exists in staging.
+•	User can proceed to UC04.
+Main Success Scenario:
+1.	User opens “New Note / Interaction” form.
+2.	User enters:
+o	Interaction type (meeting, call, note).
+o	Date/time (default to now).
+o	Free-text description.
+3.	User submits the form.
+4.	System passes text to NLP pipeline.
+5.	System receives extracted stakeholders, commitments, issues, sentiment.
+6.	System performs entity resolution.
+7.	System stores preview and opens UC04.
+Extensions:
+•	2a. User wants to skip extraction
+o	2a1. User ticks “just store as note (no structured extraction)”.
+o	2a2. System stores Interaction node with minimal structure and bypasses UC04.
+Frequency: Frequent for quick notes and ad hoc interactions.
+________________________________________
+UC04 – Review and Confirm Extracted Data (Preview & Commit)
+Primary Actor: Business User
+Goal: Validate and correct extracted stakeholders, commitments, and issues before writing to the graph.
+Preconditions:
+•	A preview bundle exists in staging for a given interaction_id (from UC01/02/03).
+Postconditions (on commit):
+•	Interaction, stakeholders, commitments, issues, and relationships are upserted into Neo4j.
+•	Preview entry is marked as committed or archived.
+•	Alerts are evaluated (UC08).
+Main Success Scenario:
+1.	User opens preview view for the new interaction.
+2.	System displays:
+o	Interaction summary and transcript/notes.
+o	Proposed stakeholders (Persons/Orgs) and links to existing or new entities.
+o	Proposed commitments (text, due dates, owners, requesters).
+o	Proposed issues and topics.
+o	Sentiment score.
+3.	User reviews stakeholders:
+o	Corrects names.
+o	Reassigns to different existing entities if necessary.
+o	Marks some as “ignore”.
+4.	User reviews commitments:
+o	Edits text.
+o	Assigns/changes owner.
+o	Adjusts due dates.
+o	Marks commitments to be created or ignored.
+5.	User reviews issues and topics:
+o	Confirms or removes.
+o	Optionally categorises issues further.
+6.	User clicks “Commit to Graph”.
+7.	System builds upsert bundle and writes to Neo4j in a transaction.
+8.	System confirms success and shows link to the final Interaction and stakeholder profiles.
+Extensions:
+•	3a. Low-confidence matches flagged
+o	3a1. System visually flags low-confidence matches.
+o	3a2. User must explicitly confirm or override them before commit.
+•	6a. User cancels
+o	6a1. System leaves preview in staging for later review.
+•	7a. Graph upsert fails (DB down)
+o	7a1. System shows error and logs details.
+o	7a2. Preview remains available to retry later.
+Frequency: Used after most ingestion events.
+________________________________________
+UC05 – Search for Stakeholder, Project, or Commitment
+Primary Actor: Business User
+Goal: Quickly find people, organisations, projects, or commitments.
+Preconditions:
+•	At least some data has been committed to the graph.
+Postconditions:
+•	User sees a list of results with relevant context and can navigate to detailed views.
+Main Success Scenario:
+1.	User types a query into the search box (e.g. “Acme”, “SOC2 report”).
+2.	User may optionally filter by type (Person, Org, Project, Commitment, Issue).
+3.	System queries LOGOS Core Search Service (graph + text search).
+4.	System returns ranked results (entities and interactions).
+5.	User clicks a result:
+o	For Person/Org → UC06 (Stakeholder 360).
+o	For Project → UC09 (Project Map).
+o	For Commitment → opens commitment detail with related interaction and stakeholder.
+Extensions:
+•	3a. No results
+o	3a1. System displays “no results” and suggests broader search or different filters.
+Frequency: Very frequent.
+________________________________________
+UC06 – View Stakeholder 360° Profile
+Primary Actor: Business User, Executive Viewer
+Goal: Understand the full context of a person or organisation across interactions, commitments, issues, and risks.
+Preconditions:
+•	Stakeholder exists in the graph (Person or Org).
+•	User has navigated from search or a link.
+Postconditions:
+•	None beyond read-only retrieval; user may jump to related use cases (e.g. UC07, UC08).
+Main Success Scenario:
+1.	User opens a stakeholder profile (Person or Org).
+2.	System retrieves from Neo4j:
+o	Stakeholder attributes.
+o	Associated organisations/people.
+o	Interactions timeline.
+o	Open and closed commitments.
+o	Related projects and contracts.
+o	Issues and risks linked to this stakeholder.
+o	Sentiment trend over time.
+o	Active alerts (if any).
+3.	System calculates:
+o	Influence score (graph-based).
+o	Risk indicators (from alerts, commitments, sentiment).
+4.	System displays:
+o	Summary header (role, org, influence, risk level).
+o	Timeline view of interactions.
+o	Commitments list with status.
+o	Charts/graphs for sentiment and risk trend.
+5.	User can:
+o	Drill into a specific interaction.
+o	Filter the timeline (date range, topic, project).
+o	Jump to related project map (UC09).
+Extensions:
+•	2a. Stakeholder has very limited history
+o	2a1. System shows minimal info and suggests possible next steps (e.g. ingest interactions).
+Frequency: Regularly used when planning engagement.
+________________________________________
+UC07 – Manage Commitments (Filter, Update Status)
+Primary Actor: Business User
+Goal: Track and maintain commitments arising from stakeholder interactions.
+Preconditions:
+•	Commitments exist in the system.
+Postconditions:
+•	Commitment statuses are updated; alerts may change accordingly.
+Main Success Scenario:
+1.	User opens “Commitments” view.
+2.	System shows a table of commitments with columns:
+o	Text, owner, stakeholder, project/contract, due date, status, age, risk flags.
+3.	User applies filters:
+o	By owner (including self).
+o	By stakeholder or organisation.
+o	By project or contract.
+o	By due date range (overdue, this week, future).
+4.	User updates status:
+o	Changes from “proposed” to “accepted”, or “in_progress” to “done”, etc.
+5.	System writes status changes to Neo4j.
+6.	System re-evaluates relevant alerts for these commitments (UC08).
+7.	User can click into an individual commitment to view its originating interaction and stakeholder.
+Extensions:
+•	4a. Bulk update
+o	4a1. User selects multiple commitments and sets a new status or due date.
+o	4a2. System applies bulk update transactionally.
+Frequency: Daily.
+________________________________________
+UC08 – View Alerts and Risk Signals
+Primary Actor: Business User, Executive Viewer
+Goal: See unresolved commitments, sentiment drops, and other risk signals.
+Preconditions:
+•	Alert rules are configured.
+•	Alert evaluation job has run at least once.
+Postconditions:
+•	None; read-only, though follow-up actions may be triggered manually.
+Main Success Scenario:
+1.	User opens “Alerts / Risks” view.
+2.	System queries LOGOS Core for current alerts, including:
+o	Unresolved commitments beyond thresholds.
+o	Stakeholders/orgs with sentiment drops.
+o	Optional project-level risk alerts (if configured).
+3.	System displays alerts with:
+o	Type, severity, affected stakeholder/project/owner, age, and suggested next action.
+4.	User filters alerts by:
+o	Type (commitments, sentiment, project).
+o	Owner.
+o	Stakeholder.
+5.	User clicks an alert to:
+o	Open relevant stakeholder profile (UC06).
+o	Open commitments view (UC07).
+o	Open project map (UC09).
+Extensions:
+•	2a. No active alerts
+o	2a1. System indicates “No active alerts” and optionally displays resolved/closed alerts history.
+Frequency: Regular review by managers and leads.
+________________________________________
+UC09 – View Project Map and Stakeholder Network
+Primary Actor: Business User, Executive Viewer
+Goal: See how stakeholders, commitments, issues, and risks relate to a specific project.
+Preconditions:
+•	Projects and related entities exist in the graph.
+Postconditions:
+•	None; read-only, though user may drill into related use cases.
+Main Success Scenario:
+1.	User selects a project (via search or project list).
+2.	System queries LOGOS Core for:
+o	Project attributes.
+o	Linked stakeholders and their roles.
+o	Linked commitments, issues, risks.
+o	Interactions related to the project.
+3.	System visualises:
+o	Graph view: Project at centre, connected to stakeholders, commitments, issues, risks.
+o	Supporting tables with filters and sorting.
+4.	User:
+o	Zooms/pans the graph or selects subgraphs (e.g. only external stakeholders).
+o	Filters by topic, risk level, or stakeholder role.
+o	Clicks on nodes to open stakeholder 360 (UC06) or commitment detail.
+Extensions:
+•	2a. Project has minimal data
+o	2a1. System shows basic structure and encourages ingestion of interactions.
+Frequency: Regularly when planning engagement or reporting on project status.
+________________________________________
+UC10 – Configure Domain Profile / Knowledgebase
+Primary Actor: System Administrator, Data/AI Engineer
+Goal: Configure LOGOS for a specific domain (stakeholder engagement, contract management, etc.) without changing code.
+Preconditions:
+•	User has administrative access.
+•	Knowledgebase and config files are accessible.
+Postconditions:
+•	Updated domain configuration and prompts are applied across relevant pipelines.
+•	Future ingests and agent behaviours reflect new settings.
+Main Success Scenario:
+1.	Admin/Engineer opens configuration interface (or edits config files in repo, depending on implementation).
+2.	User adjusts:
+o	Domain profile selection (e.g. “stakeholder_engagement”).
+o	Alert thresholds (e.g. days for unresolved commitments).
+o	Lexicons, patterns, and ontologies (topics, stakeholder types, risk categories).
+o	Model tier usage (rule-only vs local ML vs local LLM).
+3.	User saves changes.
+4.	System validates configs and reloads knowledgebase.
+5.	New ingestions and queries use updated configuration.
+Extensions:
+•	4a. Config invalid (syntax or incompatible values)
+o	4a1. System rejects the changes with clear error messages and does not apply them.
+Frequency: Occasional (when tuning behaviour or expanding to new domain).
+________________________________________
+UC11 – Agent-Assisted Summary and Briefing (Future-facing)
+Primary Actor: Business User, Executive Viewer
+Goal: Obtain AI-generated summaries and briefings (e.g. for a stakeholder, project, or board pack) using LOGOS Core knowledge.
+Preconditions:
+•	Agent Service is configured and connected to a local LLM (or equivalent).
+•	Relevant data is present in the graph.
+Postconditions:
+•	User receives summarised text and can click through to underlying data.
+Main Success Scenario:
+1.	User opens a stakeholder, project, or dashboard view.
+2.	User clicks “Generate Summary / Briefing”.
+3.	Agent Service:
+o	Gathers relevant interactions, commitments, issues, risks, outcomes from the graph.
+o	Builds a prompt using configured templates and user profile.
+o	Calls the local LLM.
+4.	LLM returns a structured summary/briefing.
+5.	System displays the briefing, including:
+o	Key stakeholders and their positions.
+o	Open commitments and risks.
+o	Recent changes and sentiment trends.
+o	Suggested engagement actions.
+6.	User can:
+o	Copy the summary into reports.
+o	Request refocus (e.g. “shorter”, “for execs”, “community impacts only”).
+Extensions:
+•	3a. LLM service unavailable
+o	3a1. System shows a clear error and suggests manual report compilation using available data views.
+Frequency: As needed, especially ahead of key meetings and governance forums.
+
