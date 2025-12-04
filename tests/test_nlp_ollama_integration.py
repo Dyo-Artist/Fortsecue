@@ -12,16 +12,18 @@ def test_extract_all_uses_ollama_when_enabled(monkeypatch):
         {
             "entities": {
                 "persons": [],
-                "orgs": [],
-                "projects": [],
-                "contracts": [],
-                "topics": [],
-                "commitments": [],
-            },
-            "relationships": [],
-            "sentiment": -0.5,
-            "summary": "From LLM",
-        }
+            "orgs": [],
+            "projects": [],
+            "contracts": [],
+            "topics": [],
+            "commitments": [],
+            "issues": [],
+            "risks": [],
+        },
+        "relationships": [],
+        "sentiment": -0.5,
+        "summary": "From LLM",
+    }
     )
 
     def fake_call_llm(prompt: str) -> str:  # noqa: ARG001
@@ -32,6 +34,8 @@ def test_extract_all_uses_ollama_when_enabled(monkeypatch):
     result = extract_mod.extract_all("some text")
     assert result["summary"] == "From LLM"
     assert result["sentiment"] == -0.5
+    assert result["entities"]["issues"] == []
+    assert result["entities"]["risks"] == []
 
 
 def test_extract_all_handles_noisy_llm_json(monkeypatch):
@@ -45,6 +49,8 @@ def test_extract_all_handles_noisy_llm_json(monkeypatch):
             "contracts": [],
             "topics": [],
             "commitments": [],
+            "issues": [],
+            "risks": [],
         },
         "relationships": [],
         "sentiment": 0.25,
@@ -62,6 +68,8 @@ def test_extract_all_handles_noisy_llm_json(monkeypatch):
 
     assert result["summary"] == "From noisy LLM"
     assert result["sentiment"] == 0.25
+    assert result["entities"]["issues"] == []
+    assert result["entities"]["risks"] == []
 
 
 def test_extract_all_falls_back_when_disabled(monkeypatch):
@@ -77,6 +85,8 @@ def test_extract_all_falls_back_when_disabled(monkeypatch):
 
     assert "Acme Pty Ltd" in result["entities"]["orgs"]
     assert result["summary"].startswith(text[:10])
+    assert result["entities"]["issues"] == []
+    assert result["entities"]["risks"] == []
 
 
 @pytest.mark.parametrize("flag", ["0", "false", "", None])

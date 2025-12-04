@@ -40,6 +40,9 @@ def _extract_entities(text: str) -> Dict[str, List[str]]:
         "contracts": [],
         "topics": [],
         "commitments": commitments,
+        "issues": [],
+        "risks": [],
+        "outcomes": [],
     }
 
 
@@ -236,7 +239,17 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
     if not isinstance(entities, dict):
         raise ValueError("LLM entities must be a JSON object")
 
-    for key in ("persons", "orgs", "projects", "contracts", "topics", "commitments"):
+    for key in (
+        "persons",
+        "orgs",
+        "projects",
+        "contracts",
+        "topics",
+        "commitments",
+        "issues",
+        "risks",
+        "outcomes",
+    ):
         entities.setdefault(key, [])
 
     data.setdefault("relationships", [])
