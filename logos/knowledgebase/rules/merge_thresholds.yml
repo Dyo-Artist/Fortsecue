@@ -1,0 +1,20 @@
+# Similarity thresholds used during entity resolution and merge decisions
+defaults:
+  name_similarity: 1.0
+  org_similarity: 1.0
+  domain_similarity: 1.0
+  email_similarity: 1.0
+  phone_similarity: 1.0
+
+org:
+  name_similarity: 1.0
+  domain_similarity: 1.0
+
+person:
+  name_similarity: 1.0
+  org_similarity: 1.0
+  email_similarity: 1.0
+  phone_similarity: 1.0
+
+project:
+  name_similarity: 1.0

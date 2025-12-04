@@ -88,3 +88,35 @@ def test_low_confidence_person_does_not_resolve():
     person = resolved["entities"]["persons"][0]
     assert person.get("canonical_id") is None
     assert person["id"] == "p_temp"
+
+
+def test_similarity_thresholds_used_for_partial_match():
+    preview = {
+        "entities": {
+            "persons": [
+                {
+                    "id": "p_temp",
+                    "name": "Alice Smyth",
+                }
+            ],
+        },
+        "relationships": [],
+    }
+
+    rules = {"person": {"name_only_score": 0.95, "min_confidence": 0.9}}
+    thresholds = {"defaults": {"name_similarity": 0.8}}
+    resolver = GraphEntityResolver(
+        lambda _q, _p: [
+            {
+                "id": "p_alice",
+                "name": "Alice Smith",
+            }
+        ],
+        rules=rules,
+        thresholds=thresholds,
+    )
+
+    resolved = resolver.resolve_preview(preview)
+    person = resolved["entities"]["persons"][0]
+    assert person["canonical_id"] == "p_alice"
+    assert person["id"] == "p_alice"

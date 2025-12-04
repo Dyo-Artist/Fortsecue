@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Mapping, Sequence
 
@@ -12,6 +13,7 @@ Rules = Dict[str, Any]
 QueryRunner = Callable[[str, Dict[str, Any]], Sequence[Mapping[str, Any]]]
 
 RULES_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "rules" / "entity_resolution.yml"
+MERGE_THRESHOLDS_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "rules" / "merge_thresholds.yml"
 
 
 class ResolutionConfigError(RuntimeError):
@@ -34,44 +36,45 @@ def _load_rules(path: Path = RULES_PATH) -> Rules:
     return data
 
 
+def _load_thresholds(path: Path = MERGE_THRESHOLDS_PATH) -> Rules:
+    if not path.exists():
+        raise ResolutionConfigError(f"Merge thresholds not found at {path}")
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            data = yaml.safe_load(file) or {}
+    except yaml.YAMLError as exc:  # pragma: no cover - defensive
+        raise ResolutionConfigError("Failed to parse merge thresholds rules") from exc
+
+    if not isinstance(data, dict):
+        raise ResolutionConfigError("Merge thresholds must be a mapping")
+
+    return data
+
+
 def _normalise_text(value: str | None) -> str | None:
     if value is None:
         return None
+    if not isinstance(value, str):
+        value = str(value)
     return value.strip().lower() or None
 
 
-def _is_text_match(left: str | None, right: str | None) -> bool:
-    return _normalise_text(left) == _normalise_text(right) and left is not None
+def _threshold_for(thresholds: Rules, category: str, key: str, default: float) -> float:
+    defaults = thresholds.get("defaults", {}) if isinstance(thresholds.get("defaults"), dict) else {}
+    section = thresholds.get(category, {}) if isinstance(thresholds.get(category), dict) else {}
+    return float(section.get(key, defaults.get(key, default)))
 
 
-def _score_candidate(rules: Rules, entity: Mapping[str, Any], candidate: Mapping[str, Any]) -> float:
-    entity_lower = {k: _normalise_text(v) if isinstance(v, str) else v for k, v in entity.items()}
-    candidate_lower = {k: _normalise_text(v) if isinstance(v, str) else v for k, v in candidate.items()}
+def _is_similar(thresholds: Rules, category: str, key: str, left: Any, right: Any, default: float = 1.0) -> bool:
+    left_norm = _normalise_text(left)
+    right_norm = _normalise_text(right)
+    if left_norm is None or right_norm is None:
+        return False
 
-    score = 0.0
-    if _is_text_match(entity_lower.get("email"), candidate_lower.get("email")):
-        score = max(score, float(rules.get("email_score", 1.0)))
-    if _is_text_match(entity_lower.get("phone"), candidate_lower.get("phone")):
-        score = max(score, float(rules.get("phone_score", 1.0)))
-
-    name_match = _is_text_match(entity_lower.get("name"), candidate_lower.get("name"))
-    org_match = _is_text_match(entity_lower.get("org_id"), candidate_lower.get("org_id")) or _is_text_match(
-        entity_lower.get("org_name"), candidate_lower.get("org_name")
-    )
-
-    if name_match and org_match:
-        score = max(score, float(rules.get("name_org_score", 0.0)))
-    elif name_match:
-        score = max(score, float(rules.get("name_only_score", 0.0)))
-
-    domain_match = _is_text_match(entity_lower.get("domain"), candidate_lower.get("domain"))
-    if domain_match:
-        score = max(score, float(rules.get("domain_score", 0.0)))
-
-    if name_match and "name_score" in rules:
-        score = max(score, float(rules.get("name_score", 0.0)))
-
-    return score
+    threshold = _threshold_for(thresholds, category, key, default)
+    similarity = SequenceMatcher(None, left_norm, right_norm).ratio()
+    return similarity >= threshold
 
 
 def _merge_resolution(entity: Mapping[str, Any], candidate: Mapping[str, Any], score: float) -> Dict[str, Any]:
@@ -104,23 +107,56 @@ def _rewrite_relationships(relations: Iterable[Mapping[str, Any]], id_map: Mappi
 class GraphEntityResolver:
     """Resolve extracted entities to canonical graph IDs using configurable rules."""
 
-    def __init__(self, run_query: QueryRunner, rules: Rules | None = None) -> None:
+    def __init__(self, run_query: QueryRunner, rules: Rules | None = None, thresholds: Rules | None = None) -> None:
         self._run_query = run_query
         self._rules = rules or _load_rules()
+        self._thresholds = thresholds or _load_thresholds()
 
     def _min_confidence(self, category: str) -> float:
         defaults = self._rules.get("defaults", {}) if isinstance(self._rules.get("defaults"), dict) else {}
         section = self._rules.get(category, {}) if isinstance(self._rules.get(category), dict) else {}
         return float(section.get("min_confidence", defaults.get("min_confidence", 1.0)))
 
+    def _score_candidate(self, category: str, entity: Mapping[str, Any], candidate: Mapping[str, Any]) -> float:
+        rules = self._rules.get(category, {}) if isinstance(self._rules.get(category), dict) else {}
+
+        score = 0.0
+        if _is_similar(self._thresholds, category, "email_similarity", entity.get("email"), candidate.get("email")):
+            score = max(score, float(rules.get("email_score", 1.0)))
+        if _is_similar(self._thresholds, category, "phone_similarity", entity.get("phone"), candidate.get("phone")):
+            score = max(score, float(rules.get("phone_score", 1.0)))
+
+        name_match = _is_similar(
+            self._thresholds, category, "name_similarity", entity.get("name"), candidate.get("name")
+        )
+        org_match = _is_similar(
+            self._thresholds, category, "org_similarity", entity.get("org_id"), candidate.get("org_id")
+        ) or _is_similar(
+            self._thresholds, category, "org_similarity", entity.get("org_name"), candidate.get("org_name")
+        )
+
+        if name_match and org_match:
+            score = max(score, float(rules.get("name_org_score", 0.0)))
+        elif name_match:
+            score = max(score, float(rules.get("name_only_score", 0.0)))
+
+        if _is_similar(
+            self._thresholds, category, "domain_similarity", entity.get("domain"), candidate.get("domain")
+        ):
+            score = max(score, float(rules.get("domain_score", 0.0)))
+
+        if name_match and "name_score" in rules:
+            score = max(score, float(rules.get("name_score", 0.0)))
+
+        return score
+
     def _best_candidate(
         self, category: str, entity: Mapping[str, Any], candidates: Sequence[Mapping[str, Any]]
     ) -> tuple[Mapping[str, Any] | None, float]:
-        rules = self._rules.get(category, {}) if isinstance(self._rules.get(category), dict) else {}
         best: Mapping[str, Any] | None = None
         best_score = 0.0
         for candidate in candidates:
-            score = _score_candidate(rules, entity, candidate)
+            score = self._score_candidate(category, entity, candidate)
             if score > best_score:
                 best = candidate
                 best_score = score
