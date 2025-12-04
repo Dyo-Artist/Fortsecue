@@ -61,4 +61,6 @@ template: |
     }
   }
 
+  Always include the "issues" and "risks" arrays, even if they are empty.
+
   Do not include any explanatory text outside of the JSON.
