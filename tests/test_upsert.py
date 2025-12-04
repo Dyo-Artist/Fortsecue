@@ -1,6 +1,6 @@
 import pathlib
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
@@ -129,6 +129,32 @@ def test_upsert_interaction_bundle_orders_entities():
                     relates_to_project_id="pr1",
                 )
             ],
+            risks=[
+                upsert.RiskModel(
+                    id="r1",
+                    title="Safety risk",
+                    relates_to_project_ids=["pr1"],
+                    relates_to_topic_ids=["t1"],
+                )
+            ],
+            outcomes=[
+                upsert.OutcomeModel(
+                    id="o1",
+                    title="Outcome",
+                    associated_project_ids=["pr1"],
+                    results_from_risk_ids=["r1"],
+                )
+            ],
+            issues=[
+                upsert.IssueModel(
+                    id="is1",
+                    title="Issue",
+                    relates_to_project_ids=["pr1"],
+                    relates_to_topic_ids=["t1"],
+                    related_risk_ids=["r1"],
+                    raised_in_interaction_id="i1",
+                )
+            ],
         ),
         relationships=[
             upsert.RelationshipModel(src="i1", dst="p1", rel="MENTIONS"),
@@ -147,3 +173,65 @@ def test_upsert_interaction_bundle_orders_entities():
     assert person_call and person_call["id"] == "p1"
     assert any("MENTIONS" in call[0] for call in tx.calls)
     assert any("INVOLVED_IN" in call[0] for call in tx.calls)
+
+
+def test_upsert_issue_links_related_entities():
+    tx = FakeTx()
+    now = datetime(2024, 5, 1, tzinfo=timezone.utc)
+    issue = upsert.IssueModel(
+        id="issue1",
+        title="Dust issue",
+        relates_to_project_ids=["pr1"],
+        relates_to_topic_ids=["topic1"],
+        related_risk_ids=["risk1"],
+        raised_in_interaction_id="i1",
+        severity="high",
+        status="open",
+    )
+
+    upsert.upsert_issue(tx, issue, now)
+
+    cypher, params = tx.calls[0]
+    assert "Issue" in cypher
+    assert "RELATED_TO" in cypher
+    assert "RAISED_IN" in cypher
+    assert params["project_ids"] == ["pr1"]
+    assert params["topic_ids"] == ["topic1"]
+    assert params["risk_ids"] == ["risk1"]
+    assert params["severity"] == "high"
+    assert params["now"] == now.isoformat()
+
+
+def test_upsert_risk_and_outcome_relationships():
+    tx = FakeTx()
+    now = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    risk = upsert.RiskModel(
+        id="risk1",
+        title="Schedule slip",
+        category="schedule",
+        likelihood="medium",
+        impact="high",
+        score=0.6,
+        relates_to_project_ids=["pr1"],
+        relates_to_topic_ids=["topic1"],
+        results_in_outcome_ids=["outcome1"],
+    )
+    outcome = upsert.OutcomeModel(
+        id="outcome1",
+        title="Delay",
+        type="failure",
+        realised_date=date(2024, 6, 15),
+        associated_project_ids=["pr1"],
+        results_from_risk_ids=["risk1"],
+    )
+
+    upsert.upsert_risk(tx, risk, now)
+    upsert.upsert_outcome(tx, outcome, now)
+
+    risk_call = next((params for cypher, params in tx.calls if "MERGE (r:Risk" in cypher), None)
+    assert risk_call and risk_call["score"] == 0.6
+    assert risk_call["outcome_ids"] == ["outcome1"]
+
+    outcome_call = next((params for cypher, params in tx.calls if "MERGE (o:Outcome" in cypher), None)
+    assert outcome_call and outcome_call["realised_date"] == "2024-06-15"
+    assert outcome_call["risk_ids"] == ["risk1"]

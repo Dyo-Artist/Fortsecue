@@ -10,9 +10,12 @@ from logos.graphio.upsert import (
     EntitiesModel,
     InteractionBundle,
     InteractionModel,
+    IssueModel,
+    OutcomeModel,
     OrgModel,
     PersonModel,
     ProjectModel,
+    RiskModel,
     RelationshipModel,
     TopicModel,
 )
@@ -106,6 +109,27 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
             name_field="text",
         )
     ]
+    issues = [
+        IssueModel.model_validate(item)
+        for item in _normalise_entity_list(
+            entities_raw.get("issues", []),
+            name_field="title",
+        )
+    ]
+    risks = [
+        RiskModel.model_validate(item)
+        for item in _normalise_entity_list(
+            entities_raw.get("risks", []),
+            name_field="title",
+        )
+    ]
+    outcomes = [
+        OutcomeModel.model_validate(item)
+        for item in _normalise_entity_list(
+            entities_raw.get("outcomes", []),
+            name_field="title",
+        )
+    ]
 
     relationships_raw = preview.get("relationships", []) if isinstance(preview, dict) else []
     relationships = [
@@ -124,6 +148,9 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
         contracts=contracts,
         topics=topics,
         commitments=commitments,
+        issues=issues,
+        risks=risks,
+        outcomes=outcomes,
     )
 
     return InteractionBundle(interaction=interaction, entities=entities, relationships=relationships)
