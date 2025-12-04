@@ -1,0 +1,39 @@
+# Model registry for LOGOS tasks and tiers.
+# Each task can define models per tier; defaults apply when task-specific entries are missing.
+defaults:
+  rule_only:
+    name: "rule_engine"
+  local_ml:
+    name: "lightweight_ml"
+  local_llm:
+    name: "gpt-oss:20b"
+
+tasks:
+  extraction_interaction:
+    local_llm:
+      name: "gpt-oss:20b"
+    rule_only:
+      name: "regex_extraction"
+  extraction_commitments:
+    local_llm:
+      name: "gpt-oss:20b"
+    rule_only:
+      name: "regex_extraction"
+  sentiment_scoring:
+    local_ml:
+      name: "sentiment_ml"
+    rule_only:
+      name: "sentiment_lexicon"
+  risk_scoring:
+    rule_only:
+      name: "risk_rules"
+  summary_interaction:
+    local_llm:
+      name: "gpt-oss:20b"
+    rule_only:
+      name: "summary_rules"
+  reasoning_risk_explanation:
+    local_llm:
+      name: "gpt-oss:20b"
+    local_ml:
+      name: "risk_ml_explainer"
