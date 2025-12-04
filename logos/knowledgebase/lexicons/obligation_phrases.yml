@@ -1,0 +1,6 @@
+# Lexicon of obligation phrases used to detect commitments in rule-only extraction.
+# Each entry may specify a regex pattern and optional regex flags.
+patterns:
+  - regex: "\\b(?:will|shall)\\b[^.]*?\\bby\\s+[^\\.\\n]+"
+    flags:
+      - IGNORECASE
