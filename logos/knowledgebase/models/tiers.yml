@@ -1,0 +1,21 @@
+# Model tier routing for LOGOS tasks.
+# tier values: rule_only | local_ml | local_llm
+# fallback_tier is optional and used when the primary tier is unavailable.
+tasks:
+  extraction_interaction:
+    tier: "local_llm"
+    fallback_tier: "rule_only"
+  extraction_commitments:
+    tier: "local_llm"
+    fallback_tier: "rule_only"
+  sentiment_scoring:
+    tier: "local_ml"
+    fallback_tier: "rule_only"
+  risk_scoring:
+    tier: "rule_only"
+  summary_interaction:
+    tier: "local_llm"
+    fallback_tier: "rule_only"
+  reasoning_risk_explanation:
+    tier: "local_llm"
+    fallback_tier: "local_ml"

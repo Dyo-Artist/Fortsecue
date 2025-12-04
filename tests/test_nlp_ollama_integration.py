@@ -1,12 +1,35 @@
 import json
 
 import pytest
+import yaml
 
+import logos.model_tiers as model_tiers
 import logos.nlp.extract as extract_mod
 
 
-def test_extract_all_uses_ollama_when_enabled(monkeypatch):
-    monkeypatch.setenv("LOGOS_USE_OLLAMA", "1")
+@pytest.fixture
+def configure_extraction_tier(monkeypatch, tmp_path):
+    def _configure(tier: str, fallback: str | None = None) -> None:
+        path = tmp_path / "tiers.yml"
+        config = {
+            "tasks": {
+                extract_mod.EXTRACTION_TASK_ID: {
+                    "tier": tier,
+                }
+            }
+        }
+        if fallback:
+            config["tasks"][extract_mod.EXTRACTION_TASK_ID]["fallback_tier"] = fallback
+
+        path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        model_tiers.clear_tier_cache()
+        monkeypatch.setattr(model_tiers, "TIERS_PATH", path)
+
+    return _configure
+
+
+def test_extract_all_uses_llm_when_configured(monkeypatch, configure_extraction_tier):
+    configure_extraction_tier(tier="local_llm", fallback="rule_only")
 
     fake_json = json.dumps(
         {
@@ -38,8 +61,8 @@ def test_extract_all_uses_ollama_when_enabled(monkeypatch):
     assert result["entities"]["risks"] == []
 
 
-def test_extract_all_handles_noisy_llm_json(monkeypatch):
-    monkeypatch.setenv("LOGOS_USE_OLLAMA", "1")
+def test_extract_all_handles_noisy_llm_json(monkeypatch, configure_extraction_tier):
+    configure_extraction_tier(tier="local_llm", fallback="rule_only")
 
     payload = {
         "entities": {
@@ -72,8 +95,8 @@ def test_extract_all_handles_noisy_llm_json(monkeypatch):
     assert result["entities"]["risks"] == []
 
 
-def test_extract_all_falls_back_when_disabled(monkeypatch):
-    monkeypatch.delenv("LOGOS_USE_OLLAMA", raising=False)
+def test_extract_all_falls_back_when_rule_only(monkeypatch, configure_extraction_tier):
+    configure_extraction_tier(tier="rule_only")
 
     def raising_call(prompt: str) -> str:  # noqa: ARG001
         raise AssertionError("call_llm should not be called")
@@ -89,28 +112,24 @@ def test_extract_all_falls_back_when_disabled(monkeypatch):
     assert result["entities"]["risks"] == []
 
 
-@pytest.mark.parametrize("flag", ["0", "false", "", None])
-def test_extract_all_respects_disabled_flags(monkeypatch, flag):
-    if flag is None:
-        monkeypatch.delenv("LOGOS_USE_OLLAMA", raising=False)
-    else:
-        monkeypatch.setenv("LOGOS_USE_OLLAMA", flag)
+def test_extract_all_falls_back_when_llm_errors(monkeypatch, configure_extraction_tier):
+    configure_extraction_tier(tier="local_llm", fallback="rule_only")
 
     called = False
 
     def raising_call(prompt: str) -> str:  # noqa: ARG001
         nonlocal called
         called = True
-        raise AssertionError("call_llm should not be called when disabled")
+        raise extract_mod.OllamaError("Unavailable")
 
     monkeypatch.setattr(extract_mod, "call_llm", raising_call)
 
     extract_mod.extract_all("Sample text")
-    assert called is False
+    assert called is True
 
 
-def test_extract_all_falls_back_when_prompt_missing(monkeypatch, tmp_path):
-    monkeypatch.setenv("LOGOS_USE_OLLAMA", "1")
+def test_extract_all_falls_back_when_prompt_missing(monkeypatch, tmp_path, configure_extraction_tier):
+    configure_extraction_tier(tier="local_llm", fallback="rule_only")
 
     missing_prompt = tmp_path / "absent.yml"
     monkeypatch.setattr(extract_mod, "PROMPT_PATH", missing_prompt)
@@ -126,7 +145,8 @@ def test_extract_all_falls_back_when_prompt_missing(monkeypatch, tmp_path):
     assert "Acme Pty Ltd" in result["entities"]["orgs"]
 
 
-def test_commitment_patterns_loaded_from_lexicon(monkeypatch, tmp_path):
+def test_commitment_patterns_loaded_from_lexicon(monkeypatch, tmp_path, configure_extraction_tier):
+    configure_extraction_tier(tier="rule_only")
     lexicon = tmp_path / "obligation_phrases.yml"
     lexicon.write_text(
         """patterns:

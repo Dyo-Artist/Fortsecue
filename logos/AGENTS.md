@@ -155,8 +155,8 @@ If code and docs disagree, prefer the docs and update them together with the cod
 
 - Neo4j config must be env-driven:
   - `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`, `NEO4J_DATABASE`.
-- Optional local LLM usage must be gated by:
-  - `LOGOS_USE_OLLAMA` (default: disabled).
+- Optional local LLM usage must be configured via knowledgebase model tiers:
+  - `logos/knowledgebase/models/tiers.yml` selects `rule_only`, `local_ml`, or `local_llm` per task.
 - Any additional local AI services (ASR/OCR) must also be optional and configured by env vars. No hard-coded endpoints.
 
 ---

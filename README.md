@@ -30,15 +30,13 @@ export NEO4J_PASSWORD="your-password"
 # export NEO4J_DATABASE="neo4j"
 ```
 
-## Optional: Ollama integration
-LOGOS runs fully without Ollama (default regex NLP). Ollama is an optional local enhancement path:
+## Configure model tiers
+Model selection is driven by `logos/knowledgebase/models/tiers.yml` and supports `rule_only`, `local_ml`, and `local_llm` per task. Update the YAML file to switch tiers; for example, set `extraction_interaction` to `local_llm` to use a local LLM for extraction. Optional Ollama settings remain environment-driven:
 
 ```bash
 # Only if you have Ollama and a local model configured:
-export LOGOS_USE_OLLAMA=1
-# optional overrides:
-# export OLLAMA_URL="http://localhost:11434/api/generate"
-# export OLLAMA_MODEL="gpt-oss:20b"
+export OLLAMA_URL="http://localhost:11434/api/generate"
+export OLLAMA_MODEL="gpt-oss:20b"
 ```
 
 ## Running the app

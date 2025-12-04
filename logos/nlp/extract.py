@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List
@@ -12,8 +12,12 @@ import yaml
 from jinja2 import Template, TemplateError
 
 from logos.interfaces.ollama_client import OllamaError, call_llm
+from logos.model_tiers import TierConfigError, get_task_tier
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "prompts" / "extraction_interaction.yml"
+EXTRACTION_TASK_ID = "extraction_interaction"
+
+LOGGER = logging.getLogger(__name__)
 OBLIGATION_LEXICON_PATH = (
     Path(__file__).resolve().parent.parent
     / "knowledgebase"
@@ -56,11 +60,6 @@ def _regex_extract_all(text: str) -> Dict[str, Any]:
         "sentiment": sentiment,
         "summary": summary,
     }
-
-
-def _ollama_enabled() -> bool:
-    val = os.getenv("LOGOS_USE_OLLAMA", "").lower()
-    return val in ("1", "true", "yes")
 
 
 class PromptConfigError(RuntimeError):
@@ -261,11 +260,32 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
 
 def extract_all(text: str) -> Dict[str, Any]:
     """Extract entities, relationships, and sentiment from raw text."""
+    tier_chain: List[str]
+    try:
+        selection = get_task_tier(EXTRACTION_TASK_ID)
+        tier_chain = [selection.tier]
+        if selection.fallback_tier and selection.fallback_tier not in tier_chain:
+            tier_chain.append(selection.fallback_tier)
+    except TierConfigError as exc:
+        LOGGER.warning("Model tier config unavailable; defaulting to rule-only extraction: %s", exc)
+        tier_chain = []
 
-    if _ollama_enabled():
-        try:
-            return _ollama_extract_all(text)
-        except (OllamaError, json.JSONDecodeError, ValueError, KeyError, PromptConfigError):
+    if "rule_only" not in tier_chain:
+        tier_chain.append("rule_only")
+
+    for tier in tier_chain:
+        if tier == "rule_only":
             return _regex_extract_all(text)
+        if tier == "local_llm":
+            try:
+                return _ollama_extract_all(text)
+            except (OllamaError, json.JSONDecodeError, ValueError, KeyError, PromptConfigError) as exc:
+                LOGGER.info("Local LLM extraction failed; attempting fallback: %s", exc)
+                continue
+        if tier == "local_ml":
+            LOGGER.info("Local ML extraction tier selected but not implemented; falling back")
+            continue
+
+        LOGGER.warning("Unknown extraction tier '%s'; falling back", tier)
 
     return _regex_extract_all(text)
