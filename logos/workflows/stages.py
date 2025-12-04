@@ -4,10 +4,11 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
-from logos.graphio.neo4j_client import get_client
+from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
+from logos.normalise.resolution import resolve_preview_from_graph
 
 from .bundles import ExtractionBundle, ParsedContentBundle, PipelineBundle, RawInputBundle
 
@@ -168,6 +169,24 @@ def require_preview_payload(bundle: Dict[str, Any] | Any, context: Dict[str, Any
         return bundle
 
     raise TypeError("Commit pipeline expects a preview mapping")
+
+
+def resolve_entities_from_graph(bundle: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Resolve preview entities to canonical graph IDs before upsert."""
+
+    if context is None:
+        context = {}
+    _trace(context, "resolve_entities_from_graph")
+
+    if not isinstance(bundle, dict):
+        raise TypeError("Entity resolution expects a preview mapping")
+
+    client_factory = context.get("graph_client_factory") or get_client
+
+    try:
+        return resolve_preview_from_graph(bundle, client_factory=client_factory)
+    except GraphUnavailable:
+        return bundle
 
 
 def build_interaction_bundle_stage(bundle: Dict[str, Any], context: Dict[str, Any] | None = None) -> InteractionBundle:

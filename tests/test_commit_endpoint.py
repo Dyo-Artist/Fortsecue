@@ -20,9 +20,14 @@ class DummyTx:
 class DummyClient:
     def __init__(self) -> None:
         self.tx = DummyTx()
+        self.queries: list[tuple[str, dict]] = []
 
     def run_in_tx(self, fn):
         fn(self.tx)
+
+    def run(self, cypher: str, params=None):
+        self.queries.append((cypher, params or {}))
+        return []
 
 
 def _seed_preview():
