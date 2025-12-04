@@ -17,11 +17,8 @@ from .graphio import search as search_module
 from .graphio.graph_views import ego_network, project_map
 from .graphio.search import search_entities
 from .graphio.neo4j_client import GraphUnavailable, get_client, ping, run_query
-from .graphio.upsert import InteractionBundle, upsert_interaction_bundle
-from .ingest import doc_ingest, note_ingest
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
-from .nlp.extract import extract_all
-from .normalise import build_interaction_bundle
+from .workflows import RawInputBundle, run_pipeline
 
 app = FastAPI()
 templates = Jinja2Templates(
@@ -53,14 +50,6 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-def _build_interaction_metadata(type_: str, source_uri: str, at: datetime | None = None) -> Dict[str, Any]:
-    return {
-        "type": type_,
-        "at": (at or datetime.now(timezone.utc)).isoformat(),
-        "source_uri": source_uri,
-    }
-
-
 def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extraction: Dict[str, Any]) -> Dict[str, Any]:
     preview = {
         "interaction": {
@@ -76,57 +65,38 @@ def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extr
     return preview
 
 
-def _commit_preview(interaction_id: str, preview: Dict[str, Any]) -> dict[str, object]:
-    bundle: InteractionBundle = build_interaction_bundle(interaction_id, preview)
-    client = get_client()
-    now = datetime.now(timezone.utc)
-
-    def _tx(tx):
-        upsert_interaction_bundle(tx, bundle, now)
-
-    client.run_in_tx(_tx)
-    logger.info("Committed interaction %s", interaction_id)
-
-    return {
-        "status": "committed",
-        "interaction_id": bundle.interaction.id,
-        "counts": {
-            "orgs": len(bundle.entities.orgs),
-            "persons": len(bundle.entities.persons),
-            "projects": len(bundle.entities.projects),
-            "contracts": len(bundle.entities.contracts),
-            "topics": len(bundle.entities.topics),
-            "commitments": len(bundle.entities.commitments),
-        },
-    }
-
-
 @app.post("/ingest/doc")
 async def ingest_doc(doc: Doc) -> dict[str, object]:
     """Ingest plain text documents and return an interaction id."""
-    interaction_stub, raw_text = doc_ingest(doc.model_dump())
-    extraction = extract_all(raw_text)
     interaction_id = uuid4().hex
-    metadata = _build_interaction_metadata(
-        type_=interaction_stub.get("type", "document"),
-        source_uri=interaction_stub.get("source_uri", doc.source_uri),
-        at=interaction_stub.get("at"),
+    raw_bundle = RawInputBundle(
+        text=doc.text, source_uri=doc.source_uri, metadata={"type": "document"}
     )
-    preview = _persist_preview(interaction_id, metadata, extraction)
+    context = {
+        "interaction_id": interaction_id,
+        "interaction_type": "document",
+        "source_uri": doc.source_uri,
+        "persist_preview": _persist_preview,
+    }
+    preview = run_pipeline("ingest_preview", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
 @app.post("/ingest/note")
 async def ingest_note(note: Note) -> dict[str, object]:
-    interaction_stub, raw_text = note_ingest(note.model_dump())
-    extraction = extract_all(raw_text)
     interaction_id = uuid4().hex
-    metadata = _build_interaction_metadata(
-        type_=interaction_stub.get("type", "note"),
-        source_uri=interaction_stub.get("source_uri", note.source_uri or ""),
-        at=interaction_stub.get("at"),
+    raw_bundle = RawInputBundle(
+        text=note.text,
+        source_uri=note.source_uri or "",
+        metadata={"type": "note", "topic": note.topic} if note.topic else {"type": "note"},
     )
-    preview = _persist_preview(interaction_id, metadata, extraction)
+    context = {
+        "interaction_id": interaction_id,
+        "interaction_type": "note",
+        "source_uri": note.source_uri or "",
+        "persist_preview": _persist_preview,
+    }
+    preview = run_pipeline("ingest_preview", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -211,10 +181,17 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
     if not text:
         raise HTTPException(status_code=502, detail="Transcription failed")
 
-    extraction = extract_all(text)
     interaction_id = uuid4().hex
-    metadata = _build_interaction_metadata("audio", payload.source_uri)
-    preview = _persist_preview(interaction_id, metadata, extraction)
+    raw_bundle = RawInputBundle(
+        text=text, source_uri=payload.source_uri, metadata={"type": "audio"}
+    )
+    context = {
+        "interaction_id": interaction_id,
+        "interaction_type": "audio",
+        "source_uri": payload.source_uri,
+        "persist_preview": _persist_preview,
+    }
+    preview = run_pipeline("ingest_preview", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -225,7 +202,12 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="interaction not found")
 
     try:
-        summary = _commit_preview(interaction_id, preview)
+        context = {
+            "interaction_id": interaction_id,
+            "graph_client_factory": get_client,
+            "commit_time": datetime.now(timezone.utc),
+        }
+        summary = run_pipeline("commit_interaction", preview, context)
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     except Exception:

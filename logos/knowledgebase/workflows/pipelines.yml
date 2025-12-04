@@ -1,4 +1,10 @@
 ingest_preview:
   - logos.workflows.stages.require_raw_input
   - logos.workflows.stages.tokenise_text
-  - logos.workflows.stages.build_preview_bundle
+  - logos.workflows.stages.apply_extraction
+  - logos.workflows.stages.build_preview_payload
+
+commit_interaction:
+  - logos.workflows.stages.require_preview_payload
+  - logos.workflows.stages.build_interaction_bundle_stage
+  - logos.workflows.stages.upsert_interaction_bundle_stage
