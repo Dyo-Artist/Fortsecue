@@ -1,0 +1,387 @@
+System Architecture Document (SAD)
+Product: LOGOS – Cognitive Engine + Stakeholder Engagement MVP
+________________________________________
+1. Introduction
+1.1 Purpose
+This document describes the system architecture for LOGOS, including:
+•	The LOGOS Core cognitive engine (Platonic/Socratic reasoning over a Neo4j graph).
+•	Shared AI pipelines (ingestion, extraction, normalisation, reasoning, alerting).
+•	The Stakeholder Engagement MVP built on top of LOGOS Core.
+It defines how components are structured, how they interact, and how the system will be deployed and evolved.
+1.2 Scope
+This architecture covers:
+•	Single-machine local deployment (developer workstation or local server).
+•	Logical and physical components required for the Stakeholder Engagement MVP.
+•	Reuse patterns so LOGOS Core can power other applications (contracts, ESG, governance, etc.).
+Multi-tenant SaaS, complex RBAC, and large-scale distributed deployments are out of scope for MVP but the design should not preclude them.
+1.3 Audience
+•	Engineers and architects implementing LOGOS.
+•	Technical stakeholders reviewing design.
+•	Future developers extending the system.
+________________________________________
+2. Architectural Context
+2.1 Business Context
+LOGOS is a stakeholder intelligence and governance platform built around a reusable cognitive engine. Over time it should support modules for:
+•	Stakeholder mapping and engagement planning.
+•	Governance workflow and approvals.
+•	AI-generated reports, risk registers, and dashboards.
+•	ESG and social licence analytics.
+•	Compliance and audit trails.
+•	Predictive modelling of stakeholder outcomes.
+The Stakeholder Engagement MVP is the first module, built on top of LOGOS Core.
+2.2 System Context
+At MVP, the system is deployed inside an organisation’s secure environment and interacts with:
+•	End users (category managers, project leads, analysts) via a web UI.
+•	Local file systems for document uploads and (optionally) watched folders.
+•	Local AI services (e.g. Ollama for LLMs, local ASR/OCR) where configured.
+•	Neo4j as the persistent graph store.
+No mandatory outbound connections to cloud services.
+2.3 Relationship to Other Systems
+Initially, LOGOS runs mostly standalone:
+•	Optional future integrations:
+o	Email and calendar (Gmail/O365).
+o	Contract/document repositories.
+o	Project management tools.
+o	BI tools for reporting.
+These are treated as connectors talking to LOGOS through well-defined APIs.
+________________________________________
+3. Architectural Goals and Principles
+1.	Local-first and privacy-preserving
+o	All core processing can run completely on-prem.
+o	External AI APIs are optional and pluggable.
+2.	Core–Application separation
+o	LOGOS Core (graph, pipelines, reasoning, knowledgebase) is independent of any specific app/UI.
+o	Stakeholder Engagement is a client of LOGOS Core, not tightly coupled.
+3.	Re-usable AI pipelines
+o	Ingestion, extraction, normalisation, graph upsert, reasoning and alerting are built as generic services with domain configuration, not hard-coded logic.
+4.	Platonic / Socratic knowledge model
+o	Clear separation between Forms, Concepts, Particulars, Agents, and Dialectical lines (relationships and arguments).
+o	Architecture must support explanation (“why”) paths through the graph.
+5.	Modular and pluggable models
+o	Rule-first by default; can switch to local ML/LLM with configuration.
+o	Model tiers must be swappable without changing orchestration code.
+6.	Explainability and provenance
+o	Every node/edge has source_uri, timestamps, and, where possible, contributing inputs.
+o	Reasoning outputs should expose the paths and facts used.
+7.	Extensibility
+o	Easy to add new domains (e.g. ESG) by changing configuration, schemas, and prompts, not rewriting the whole system.
+________________________________________
+4. High-Level Architecture Overview
+4.1 Layered Architecture
+The system is organised into layers:
+1.	Presentation Layer (UI)
+o	Web UI (FastAPI templates or React front-end).
+o	Screens: upload/ingest, preview, stakeholder view, search, alerts, graph views.
+2.	API Layer
+o	FastAPI application exposing HTTP endpoints:
+	/ingest/doc, /ingest/audio
+	/preview/{interaction_id}, /commit/{interaction_id}
+	/search, /graph/ego, /alerts, /stakeholder/{id}
+o	Handles authentication, request validation, response formatting.
+3.	Orchestration & Pipelines Layer
+o	Python services orchestrating:
+	Document parsing.
+	Transcription (if audio).
+	NLP extraction.
+	Normalisation.
+	Graph upsert.
+	Alert evaluation.
+4.	Knowledgebase & Configuration Layer
+o	Structured configuration and prompt templates:
+	Model selection (rule-only vs ML vs LLM).
+	Domain ontologies and patterns.
+	Thresholds for alerts and scoring.
+5.	Persistence Layer
+o	Neo4j as graph store (Forms/Concepts/Particulars/Agents).
+o	Small local stores (e.g. SQLite/JSON/YAML files) for:
+	Config and prompts.
+	Model artefact metadata.
+	Caches/indices if needed.
+6.	Support Services
+o	Logging and metrics.
+o	Background job runner (for longer-running tasks, alert sweeps).
+o	Optional local AI services (LLM / ASR / OCR) accessible via HTTP.
+4.2 Core Components
+•	Ingestion Service (logos/ingest/)
+o	Handles uploads, watched folders, and API-based ingestion.
+o	Normalises incoming files into text + metadata.
+•	Transcription Service (logos/transcribe/)
+o	Optional; converts audio to text via local ASR or plug-in.
+•	NLP Extraction Service (logos/nlp/)
+o	Runs NER, relation extraction, commitment detection, sentiment, topics.
+•	Normalisation & Entity Resolution Service (logos/normalise/)
+o	Deduplicates entities and links mentions to canonical graph nodes.
+•	GraphIO / Neo4j Client (logos/graphio/)
+o	Upserts nodes and relationships in Neo4j with provenance.
+o	Provides search and graph queries wrapped in Python + HTTP APIs.
+•	Reasoning Engine (logos/reasoning/)
+o	Computes influence, risk scores, and path-based explanations.
+o	Provides ranked stakeholder/projects/commitments results.
+•	Alerting Service (logos/alerts/)
+o	Periodically evaluates rules and updates alert state.
+•	Agent Service (logos/agents/)
+o	Provides per-user agent context and prompt composition.
+o	Orchestrates calls to LLMs or extraction/query pipelines to answer questions and propose actions.
+•	Search Service (logos/search/)
+o	Combines graph queries, full-text search, and (optional) vector search.
+•	Web UI / API Gateway (logos/ui/, logos/app.py)
+o	Presents data to users and forwards requests to underlying services.
+4.3 End-to-End Data Flow (Conceptual)
+1.	User uploads or submits content via UI or API.
+2.	Ingestion Service parses / transcribes into text + metadata.
+3.	NLP Extraction produces entities, relationships, commitments, sentiment.
+4.	Normalisation resolves entities to canonical graph nodes.
+5.	GraphIO upserts an Interaction node and all related nodes/edges into Neo4j.
+6.	Alerting Service updates alert state based on new graph data.
+7.	Users query via search, stakeholder view, or graph views; Reasoning Engine and Search Service respond using Neo4j.
+________________________________________
+5. Logical View
+5.1 Logical Modules
+•	logos/app.py
+o	FastAPI initialisation, dependency injection, route registration.
+•	logos/config/
+o	Configuration files and loaders (YAML/JSON):
+	Environment config (paths, ports, Neo4j URI).
+	Domain profiles (stakeholder engagement, etc.).
+	Model selection and thresholds.
+•	logos/knowledgebase/
+o	Prompts, pattern libraries, ontologies.
+o	Versioned and editable without code changes.
+•	logos/ingest/
+o	parsers.py (DOCX, PDF, TXT, CSV).
+o	watcher.py (optional, file system watcher).
+•	logos/transcribe/
+o	local_asr.py (ASR interface and stub implementation).
+•	logos/nlp/
+o	ner.py, rel_extract.py, commitment_extract.py, sentiment.py.
+o	Abstraction interfaces with pluggable backends (rule-based, spaCy, LLM).
+•	logos/normalise/
+o	Entity resolution algorithms and heuristics.
+o	Graph snapshot caching for efficient resolution.
+•	logos/graphio/
+o	neo4j_client.py (driver wrapper, health checks, transactions).
+o	upsert.py (idempotent Cypher routines for all node/edge types).
+o	queries.py (search, stakeholder view, ego network, project map).
+•	logos/reasoning/
+o	Risk scoring, influence/path scoring, explanation builders.
+•	logos/alerts/
+o	Rule evaluation and alert persistence (in graph or side store).
+•	logos/agents/
+o	Per-user profile models and prompt builders.
+o	Optionally orchestrates LLM calls via logos/llm_client.py.
+•	logos/ui/
+o	Web templates / React assets.
+o	Simple graph visualisations and tables.
+5.2 Core Domain Objects
+•	Forms: Person, Organisation, Project, Contract, Topic, Commitment, Interaction, Issue, Risk, Outcome, Document, Policy.
+•	Concepts: Domain-specific refinements (e.g. “Community Stakeholder”, “Regulator”, “Critical Commitment”).
+•	Particulars: Concrete instances (Jane Doe, Acme Pty Ltd, Project X).
+•	Agents: AI agents acting on behalf of users; modelled as nodes with relationships to users and knowledge.
+Each has associated relationships as per SRS (WORKS_FOR, INVOLVED_IN, PARTY_TO, MADE, RELATES_TO, MENTIONS, INFLUENCES, etc.).
+5.3 Knowledgebase Structures
+•	Prompt templates keyed by:
+o	Task type (summary, extraction, risk explanation, report).
+o	Domain (stakeholder engagement, etc.).
+•	Pattern libraries:
+o	Obligation phrases, risk phrases, sentiment modifiers.
+•	Domain ontologies:
+o	Stakeholder types, risk categories, issue types, ESG themes.
+________________________________________
+6. Process View (Key Use Cases)
+6.1 Document Ingestion and Commit
+1.	User uploads DOCX/PDF/TXT via /ingest/doc.
+2.	API stores file and creates a temporary Interaction placeholder.
+3.	Ingestion Service parses text and passes to NLP Extraction.
+4.	NLP Extraction returns entities, relationships, commitments, sentiment.
+5.	Normalisation resolves entities against Neo4j.
+6.	System stores a preview bundle (in memory or a small store) keyed by interaction_id.
+7.	UI retrieves /preview/{interaction_id} and renders extracted items for review.
+8.	User edits/removes entries and confirms.
+9.	/commit/{interaction_id} builds a graph upsert bundle and calls GraphIO.
+10.	GraphIO executes transactional MERGEs in Neo4j.
+11.	Alerting Service may run immediately for new Interaction or on a periodic schedule.
+6.2 Audio Ingestion
+1.	User uploads audio via /ingest/audio.
+2.	Ingestion Service delegates to Transcription Service.
+3.	Subsequent steps are identical to document ingestion.
+6.3 Search and Stakeholder 360 View
+1.	User types a query into UI search (/search?q=…).
+2.	Search Service:
+o	Searches graph (names, labels) and full-text indexes.
+o	Optionally uses vector search for semantic queries.
+3.	If user selects a stakeholder, UI calls /stakeholder/{id}.
+4.	GraphIO retrieves stakeholder profile, interaction timeline, commitments, projects, sentiment trend.
+5.	Reasoning Engine computes risk/influence metrics.
+6.	UI displays 360 view and optionally an ego network graph.
+6.4 Alerts Evaluation
+1.	Periodic job triggers Alerting Service (e.g. every N minutes).
+2.	Alerting Service runs rule queries over Neo4j:
+o	Unresolved commitments past due.
+o	Sentiment trends below thresholds.
+3.	New or updated alerts are stored as nodes/edges or as attributes on existing nodes.
+4.	UI retrieves /alerts and presents open alerts.
+6.5 Agent-Assisted Query
+1.	User asks a natural language question via UI (future step, optional in MVP).
+2.	Agent Service:
+o	Parses intent (e.g. “risks for Acme on Project X”).
+o	Assembles appropriate graph queries and/or LLM prompts.
+o	Calls Search/Reasoning/GraphIO and optionally LLM.
+3.	Returns structured answer + explanation.
+4.	UI renders summarised response and links to underlying data.
+________________________________________
+7. Deployment View
+7.1 MVP Deployment (Single Machine)
+Processes:
+•	logos-api
+o	FastAPI application, hosts HTTP endpoints and UI.
+•	logos-worker (optional from day one, but architected)
+o	Background jobs (long-running ingestion, alert sweeps).
+•	neo4j
+o	Graph database instance.
+•	ollama / local-llm (optional)
+o	Local LLM server for advanced extraction and summarisation.
+•	local-asr (optional)
+o	ASR engine for speech-to-text.
+All on the same host, communicating over localhost.
+7.2 Small Team Deployment (Server)
+•	Same components, but:
+o	logos-api and logos-worker run as separate services/containers.
+o	Neo4j on same or dedicated VM.
+o	Local LLM/ASR on separate machine if needed.
+Reverse proxy (e.g. Nginx) can front logos-api for SSL and auth.
+7.3 Future Scaled Deployment
+•	Stateless services (API, workers) scaled horizontally.
+•	Neo4j clustered for high availability and capacity.
+•	Monitoring and log aggregation added (Prometheus, ELK or similar).
+•	Authentication integrated with corporate IdP (OIDC/SAML).
+________________________________________
+8. Data Architecture
+8.1 Graph Schema
+Core node labels (as per SRS):
+•	:Person, :Org, :Project, :Contract, :Topic, :Commitment, :Interaction, :Issue, :Risk, :Outcome, :Document, :Policy, :Agent.
+Key relationships:
+•	(:Person)-[:WORKS_FOR]->(:Org)
+•	(:Person)-[:INVOLVED_IN]->(:Project)
+•	(:Org)-[:PARTY_TO]->(:Contract)
+•	(:Interaction)-[:MENTIONS]->(:Topic|:Org|:Person|:Project|:Contract|:Issue|:Risk)
+•	(:Person)-[:MADE]->(:Commitment)
+•	(:Commitment)-[:RELATES_TO]->(:Project|:Contract|:Topic|:Issue)
+•	(:Person)-[:INFLUENCES {weight}]->(:Person)
+•	(:Agent)-[:ASSISTS]->(:Person)
+Forms/Concepts/Particulars are represented as:
+•	Form implied by label and metadata.
+•	Concept as nodes describing types (e.g. :StakeholderType, :RiskCategory) related via :INSTANCE_OF or :TYPE_OF.
+•	Particulars as standard domain nodes.
+8.2 IDs, Versioning and Provenance
+•	Each node uses a stable id property (e.g. p_<hash>, o_<hash>).
+•	Relationships may also hold IDs if required for external linking.
+•	Provenance properties:
+o	source_uri, first_seen_at, last_seen_at, created_by, updated_by.
+•	Interactions and documents store:
+o	Original file path / URI.
+o	Processing version (which model version produced the extraction).
+8.3 Indexing and Constraints
+•	Unique constraints on:
+o	Person.id, Org.id, Project.id, Contract.id, etc.
+•	Indexes on:
+o	Names, emails, domains, project codes, contract IDs.
+o	Timestamps on Interaction.at and Commitment.due_date.
+________________________________________
+9. Integration and Interfaces
+9.1 Public HTTP API (Internal Use)
+Key endpoint families:
+•	Ingestion
+o	POST /ingest/doc
+o	POST /ingest/audio
+•	Preview & Commit
+o	GET /preview/{interaction_id}
+o	POST /commit/{interaction_id}
+•	Search & Views
+o	GET /search?q=…
+o	GET /stakeholder/{id}
+o	GET /graph/ego?person_id=…
+o	GET /project/{id}/map
+•	Alerts
+o	GET /alerts
+These APIs are used by the UI and can be reused by other internal systems.
+9.2 Local LLM / ASR / OCR Integration
+•	Configurable via knowledgebase and environment variables.
+•	Typical pattern:
+o	logos/llm_client.py: HTTP client for local LLM server (e.g. POST /api/generate).
+o	logos/asr_client.py: HTTP client for local ASR server.
+o	Optional logos/ocr_client.py for image-based PDFs.
+•	All external calls must be optional and replaceable with stubs.
+9.3 File System Integration
+•	Upload-based interaction: users browse and upload.
+•	Optional watcher: a configured directory from which new files are picked up and processed into preview interactions.
+________________________________________
+10. Security and Privacy Architecture
+10.1 Data Boundary
+•	All sensitive data stays inside the organisation network.
+•	Default deployments do not call any internet services.
+10.2 Authentication and Authorisation (MVP)
+•	MVP can start with:
+o	Single-user or simple token-based access.
+•	Architecture must allow plugging in:
+o	SSO via OIDC/SAML in later phases.
+•	Role-based access:
+o	Read-only vs read-write (for analysts vs execs) can be added incrementally.
+10.3 Storage Security
+•	Neo4j data directory protected by OS-level access control.
+•	Optionally, full-disk or database-level encryption based on organisational standards.
+10.4 Logging and Audit
+•	All major actions logged with:
+o	User, timestamp, operation type, relevant IDs.
+•	Graph provenance captures source and interactions for audit trails.
+________________________________________
+11. Quality Attributes
+11.1 Performance
+•	Target as per SRS:
+o	≤ 2 minutes from upload to graph commit for typical documents.
+o	≤ 2 seconds for common read queries.
+Design implications:
+•	Use batch write transactions to Neo4j.
+•	Avoid N+1 query patterns; precompute or cache where needed.
+•	Limit heavy LLM usage to optional steps or background tasks.
+11.2 Availability and Reliability
+•	Single-node MVP is not HA, but:
+o	Components fail gracefully (errors visible, no silent corruption).
+o	Backups and restore procedures documented for Neo4j.
+11.3 Maintainability
+•	Clear module boundaries; minimal cross-module imports.
+•	Use dependency inversion to isolate model implementations behind interfaces.
+•	Configuration-driven behaviour, not hard-coded constants.
+11.4 Testability
+•	Unit tests around:
+o	Ingestion, parsing, and extraction.
+o	Normalisation logic.
+o	Graph upsert functions.
+•	Integration tests for full ingest → preview → commit flow.
+•	Use fixture graphs for predictable reasoning tests.
+11.5 Observability
+•	Structured logging for all services.
+•	Basic metrics:
+o	Ingest counts.
+o	Processing times.
+o	Error rates.
+o	Graph size (nodes/edges) over time.
+________________________________________
+12. Future Evolution
+12.1 Additional Modules
+Same LOGOS Core will power:
+•	Contracts governance (redlining, clause extraction, obligations).
+•	ESG and social licence analytics.
+•	Policy compliance and audit.
+•	Project dashboards and predictive outcome modelling.
+New modules reuse ingestion, NLP, normalisation, graph, reasoning, agents and UI patterns with different configurations and schema extensions.
+12.2 Workflow Engine
+•	Introduce a modular workflow/orchestration engine that can be configured per domain:
+o	Approval workflows.
+o	Escalation rules.
+o	Multi-step governance processes.
+12.3 Multi-Tenancy & Enterprise Scale
+•	Introduce:
+o	Tenant scoping at graph level (labels/properties).
+o	Strong auth and RBAC integration.
+o	Multi-node deployments across environments.
+
