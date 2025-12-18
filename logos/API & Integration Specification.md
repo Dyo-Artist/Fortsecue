@@ -274,11 +274,17 @@ Success response (200):
       {
         "temp_id": "tmp_p1",
         "canonical_id": "p_jane_smith",
+        "best_guess_id": "p_jane_smith",
         "name": "Jane Smith",
         "email": "jane.smith@acme.com",
         "org_id": "o_acme",
         "confidence": 0.98,
-        "is_new": false
+        "is_new": false,
+        "identity_candidates": [
+          {"id": "p_jane_smith", "score": 0.98, "matched_fields": ["email"]}
+        ],
+        "alternates": [],
+        "resolution_status": "resolved"
       }
     ],
     "orgs": [
@@ -288,7 +294,12 @@ Success response (200):
         "name": "Acme Pty Ltd",
         "sector": "mining",
         "confidence": 0.95,
-        "is_new": false
+        "is_new": false,
+        "identity_candidates": [
+          {"id": "o_acme", "score": 0.95, "matched_fields": ["name"]}
+        ],
+        "alternates": [],
+        "resolution_status": "resolved"
       }
     ],
     "projects": [
@@ -325,10 +336,14 @@ Success response (200):
     "topics": [
       { "id": "t_security", "name": "Security" }
     ]
-  }
+  },
+  "resolution_log": []
 }
 Notes:
-•	temp_id is a local identifier only within the preview; canonical_id is the resolved graph ID if matched.
+•	temp_id is a local identifier only within the preview; canonical_id is the resolved graph ID if matched and the confidence threshold is met. best_guess_id reflects the current highest-scoring candidate even when canonical_id is null.
+•	identity_candidates captures the ranked hypotheses with confidence scores and matched fields; alternates keeps non-primary options so the UI can surface ambiguity.
+•	resolution_status indicates whether the resolver considers the entity resolved, ambiguous, multi_resolved (close scores), or unresolved.
+•	resolution_log is appended to when ambiguities or reassignment events occur so that the UI and audit layer can trace identity shifts over time.
 •	The UI uses this to let the user edit/confirm before commit.
 Error responses:
 •	404 NOT_FOUND – unknown interaction_id or preview expired.
