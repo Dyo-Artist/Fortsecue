@@ -23,6 +23,12 @@ dependencies = [
   "pyyaml",
   "httpx",
   "python-dotenv",
+  "jinja2",
+  "python-multipart",
+  "python-dateutil",
+  "tenacity",
+  "typing-extensions",
+  "orjson",
 ]
 
 
@@ -30,6 +36,8 @@ dependencies = [
 dev = [
   "pytest",
   "ruff",
+  "pytest-asyncio",
+  "pytest-mock",
 ]
 
 nlp = [
