@@ -6,6 +6,8 @@ from typing import Any, Dict, List
 from uuid import uuid4
 
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
+from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
+from logos.memory import MemoryManager
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
@@ -26,6 +28,16 @@ def _trace(context: Dict[str, Any], stage_name: str) -> None:
 
     trace: List[str] = context.setdefault("trace", [])  # type: ignore[assignment]
     trace.append(stage_name)
+
+
+def _get_memory_manager(context: Dict[str, Any]) -> MemoryManager:
+    manager = context.get("memory_manager")
+    if isinstance(manager, MemoryManager):
+        return manager
+
+    manager = MemoryManager()
+    context["memory_manager"] = manager
+    return manager
 
 
 def require_raw_input(bundle: PipelineBundle | Dict[str, Any], context: Dict[str, Any] | None = None) -> RawInputBundle:
@@ -199,6 +211,25 @@ def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | No
         "reasoning": reasoning,
     }
 
+    if reasoning:
+        manager = _get_memory_manager(context)
+        importance = float(context.get("reasoning_importance", 0.0)) if context else 0.0
+        short_item = manager.record_short_term(
+            str(interaction_id),
+            "reasoning_trace",
+            reasoning,
+            importance=importance,
+            tags=("reasoning", type_),
+            metadata={"source_uri": source_uri, "summary": extraction_data.get("summary", bundle.summary)},
+        )
+        if context.get("persist_reasoning") or context.get("retain_reasoning"):
+            manager.promote_short_term_to_mid_term(
+                str(interaction_id),
+                short_item.id,
+                pinned=bool(context.get("pin_reasoning", False)),
+                importance=importance,
+            )
+
     persist_fn = context.get("persist_preview")
     if callable(persist_fn):
         return persist_fn(interaction_id, metadata, extraction_data)
@@ -292,6 +323,38 @@ def upsert_interaction_bundle_stage(
     }
 
 
+def ensure_memory_manager(bundle: Any, context: Dict[str, Any] | None = None) -> MemoryManager:
+    """Guarantee a MemoryManager is available in the pipeline context."""
+
+    if context is None:
+        context = {}
+    _trace(context, "ensure_memory_manager")
+
+    if isinstance(bundle, MemoryManager):
+        context.setdefault("memory_manager", bundle)
+        return bundle
+
+    return _get_memory_manager(context)
+
+
+def consolidate_memory_stage(manager: MemoryManager, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Run consolidation to decay or promote memory entries."""
+
+    if context is None:
+        context = {}
+    _trace(context, "consolidate_memory_stage")
+
+    if not isinstance(manager, MemoryManager):
+        raise TypeError("consolidate_memory_stage expects a MemoryManager instance")
+
+    session_id = context.get("interaction_id")
+    session_key = str(session_id) if session_id is not None else None
+    now_candidate = context.get("now")
+    now = now_candidate if isinstance(now_candidate, datetime) else None
+    persist_candidate = context.get("persist_long_term")
+    persist_fn = persist_candidate if callable(persist_candidate) else None
+
+    return manager.consolidate(session_id=session_key, now=now, persist_fn=persist_fn)
 def _summarise_counts(bundle: InteractionBundle) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     for node in bundle.nodes:

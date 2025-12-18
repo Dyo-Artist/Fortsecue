@@ -135,6 +135,20 @@ o	Presents data to users and forwards requests to underlying services.
 2.	Ingestion Service parses / transcribes into text + metadata.
 3.	NLP Extraction produces entities, relationships, commitments, sentiment.
 4.	Normalisation resolves entities to canonical graph nodes.
+5.	GraphIO upserts an Interaction node and all related nodes/edges into Neo4j.
+6.	Alerting Service updates alert state based on new graph data.
+7.	Users query via search, stakeholder view, or graph views; Reasoning Engine and Search Service respond using Neo4j.
+4.4 Memory Subsystem (Hippocampus-inspired)
+•	Short-term memory (volatile)
+o	Session/pipeline-scoped caches inside MemoryManager and bundles for reasoning traces and justifications.
+o	TTL and per-session caps configured in knowledgebase/rules/memory.yml; default behaviour is non-persistent unless explicitly retained.
+•	Mid-term memory (staging)
+o	Holds unconfirmed insights, meeting summaries, and reasoning chains with decay + reinforcement (strength/last_used) driven by memory.yml thresholds.
+o	Pinned items bypass decay; repeated use refreshes TTL and increases strength.
+•	Long-term memory (canonical)
+o	Neo4j graph and knowledgebase files remain the durable store. Promotion requires threshold satisfaction or user confirmation; large narratives are summarised before persistence to manage storage cost.
+•	MemoryConsolidationPipeline
+o	A periodic pipeline (workflows/pipelines.yml) that moves items short → mid → long term, evicts expired entries, and invokes graph upserts/archival based on promotion and demotion thresholds.
 5.	GraphIO upserts an Interaction node and all related nodes/edges into Neo4j using dynamic schema definitions from the knowledgebase.
 6.	Knowledgebase Persist records schema usage/changes; the Sync & Collaboration Service broadcasts updates so other users/agents refresh their views.
 7.	Alerting Service and Reasoning Engine react to new graph data and broadcast alert/score changes when relevant.

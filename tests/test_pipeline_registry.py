@@ -24,6 +24,10 @@ def test_load_pipeline_config_reads_yaml_registry():
         "logos.workflows.stages.build_interaction_bundle_stage",
         "logos.workflows.stages.upsert_interaction_bundle_stage",
     ]
+    assert pipelines["memory_consolidation"] == [
+        "logos.workflows.stages.ensure_memory_manager",
+        "logos.workflows.stages.consolidate_memory_stage",
+    ]
 
 
 def test_run_pipeline_executes_stages_in_order(tmp_path):

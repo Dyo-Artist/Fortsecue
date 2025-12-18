@@ -92,6 +92,22 @@ o	Uses scikit-learn, spaCy, or similar libraries.
 o	Larger local LLMs (e.g. via Ollama) or stronger transformers.
 o	Used for extraction, summarisation, and Q&A where higher quality is needed.
 The pipeline is designed so that switching tiers is configuration-driven, not architecture-changing.
+2.3 Cognitive Memory Tiers
+LOGOS models must respect a tiered memory design inspired by human cognition:
+•	Short-term (volatile)
+o	Ephemeral reasoning traces and intermediate steps scoped to a single pipeline run or user session.
+o	Kept in bundle/context memory (e.g. ReasoningBundle traces) and discarded at the end of the session unless explicitly retained.
+o	TTL and per-session caps are defined in knowledgebase/rules/memory.yml; no graph writes occur from this tier by default.
+•	Mid-term (staging)
+o	Managed by the MemoryManager with decay and reinforcement (strength + last_used).
+o	Items are promoted from short-term when importance crosses thresholds from knowledgebase/rules/memory.yml or when a user flags them for retention.
+o	Each access reinforces strength and refreshes TTL; unused items decay and are evicted.
+•	Long-term (canonical)
+o	Neo4j + knowledgebase files remain the source of truth for consolidated knowledge.
+o	Promotion requires strength/importance thresholds or user confirmation; large justifications are summarised/compressed (summary_max_chars in memory.yml) before persistence to control storage.
+•	Consolidation
+o	A MemoryConsolidationPipeline (workflows/pipelines.yml) moves data short → mid → long term, applies decay, and hands off long-term candidates to graph upsert routines.
+o	Pinned items (pin_user_flagged in memory.yml) bypass decay; demotion thresholds mark obsolete long-term facts for archival.
 ________________________________________
 3. Model Architectures
 3.1 NLP Extraction Models
@@ -387,4 +403,3 @@ o	Domain-specific models for:
 	Contract clause classification.
 	ESG metric extraction.
 	Governance / policy compliance checks.
-
