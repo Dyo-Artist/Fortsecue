@@ -30,6 +30,11 @@ The knowledgebase is the control layer for LOGOS Core. It:
 •	Provides rule and threshold parameters for scoring and alerts.
 •	Holds learned parameters that change as the system adapts.
 The codebase should be as generic as possible; the knowledgebase should hold domain-specific logic.
+The knowledgebase is **readable and writable**:
+•	Pipelines update usage_frequency and last_seen_at for schema elements as they are exercised.
+•	New Forms/Concepts/relationship templates can be appended by agents or users (with change-log entries capturing introduction_version and added_by).
+•	Feedback-driven prompt/rule adjustments are written back to YAML so learning persists across runs.
+•	Write-backs preserve formatting and are reviewed in version control; the system never assumes the files are static initialisation data.
 ________________________________________
 3. Physical Structure
 Recommended directory layout (under logos/knowledgebase/):
@@ -128,6 +133,7 @@ ________________________________________
 5. Forms, Concepts, Topics
 5.1 Forms (concepts/forms.yml)
 Defines the core Forms LOGOS reasons about.
+•	The list below is the current seed for the stakeholder_engagement profile; new Forms can be added or deprecated at runtime with metadata (introduction_version, usage_frequency, deprecated flag).
 forms:
   - id: form_stakeholder
     name: "Stakeholder"

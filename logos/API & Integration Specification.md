@@ -33,9 +33,10 @@ Versioning:
 •	Character set: UTF-8.
 2.3 Authentication
 MVP options (choose one and configure):
-•	No auth for single-user desktop deployments.
-•	Bearer token auth header (recommended basic pattern):
+•	No auth only for local single-user developer sandboxes.
+•	Bearer token auth header (recommended baseline for multi-user/local-first deployments):
 o	Authorization: Bearer <token>
+•	WebSocket channels for sync broadcasts reuse the same bearer tokens or session cookies.
 Auth is enforced at reverse proxy or API level; endpoints below assume the request is already authenticated (or intentionally unauthenticated in dev).
 2.4 Standard Headers
 Clients SHOULD send:
@@ -82,6 +83,11 @@ Response envelope:
   "total_items": 134,
   "total_pages": 7
 }
+2.7 Real-time Sync and Collaboration
+•	WebSocket endpoint (e.g. /api/v1/ws) publishes events after commit, concept edit, alert updates, or memory consolidation.
+•	Event payloads include: affected_ids, interaction_id (if applicable), schema_version, bundle_type, and summary of changes (e.g., "new Concept added", "Commitment updated", "alert closed").
+•	Clients subscribe to keep UI tabs and agent sessions in sync; reconnect logic should handle transient network drops.
+•	All events respect authentication/authorisation and reuse bearer/session tokens.
 ________________________________________
 3. Data Models (External View)
 These are the API payload shapes (simplified) that mirror the graph model.
@@ -780,4 +786,3 @@ o	GET /api/v1/alerts.
 o	GET /api/v1/health.
 o	GET /api/v1/config/domain.
 This specification is consistent with the SRS, SAD, and graph schema, and gives you a clean, stable surface for both the first Stakeholder Engagement UI and any future tools that plug into LOGOS Core.
-
