@@ -8,7 +8,7 @@ name = "logos"
 version = "0.1.0"
 description = "LOGOS Cognitive Engine and Stakeholder Engagement MVP"
 authors = [
-  { name = "Your Name", email = "you@example.com" }
+  { name = "Lachlan Robertson", email = "lachlanrobertson@iinet.net.au" }
 ]
 requires-python = ">=3.12"
 classifiers = [
@@ -21,9 +21,15 @@ dependencies = [
   "uvicorn[standard]",
   "neo4j",
   "pyyaml",
+  "httpx",
   "spacy",
   "transformers",
   "scikit-learn",
+]
+
+[project.optional-dependencies]
+dev = [
   "pytest",
-  "ruff"
+  "ruff",
+  "httpx",
 ]
