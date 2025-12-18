@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict
 import pathlib
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from .graphio.graph_views import ego_network, project_map
 from .graphio.search import search_entities
 from .graphio.neo4j_client import GraphUnavailable, get_client, ping, run_query
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
+from .services.sync import build_graph_update_event, update_broadcaster
 from .workflows import RawInputBundle, run_pipeline
 
 app = FastAPI()
@@ -48,6 +49,16 @@ class AudioPayload(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.websocket("/ws/updates")
+async def updates(websocket: WebSocket) -> None:
+    await update_broadcaster.register(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        await update_broadcaster.unregister(websocket)
 
 
 def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extraction: Dict[str, Any]) -> Dict[str, Any]:
@@ -206,6 +217,7 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
             "interaction_id": interaction_id,
             "graph_client_factory": get_client,
             "commit_time": datetime.now(timezone.utc),
+            "graph_update_builder": build_graph_update_event,
         }
         summary = run_pipeline("commit_interaction", preview, context)
     except GraphUnavailable:
@@ -213,6 +225,13 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
     except Exception:
         logger.exception("Failed to commit interaction %s", interaction_id)
         raise HTTPException(status_code=500, detail="commit_failed")
+
+    graph_updates = context.get("graph_updates", [])
+    for update in graph_updates:
+        try:
+            await update_broadcaster.broadcast(update)
+        except Exception:  # pragma: no cover - defensive guard to avoid failing commit responses
+            logger.exception("Failed to broadcast graph update for interaction %s", interaction_id)
 
     PENDING_INTERACTIONS.pop(interaction_id, None)
     return summary

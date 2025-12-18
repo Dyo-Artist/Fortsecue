@@ -84,3 +84,19 @@ def test_commit_endpoint_returns_404_for_missing_preview():
     response = client.post("/commit/unknown")
     assert response.status_code == 404
     assert response.json() == {"detail": "interaction not found"}
+
+
+def test_commit_broadcasts_updates(monkeypatch):
+    client = TestClient(main.app)
+    dummy_client = DummyClient()
+    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    _seed_preview()
+
+    with client.websocket_connect("/ws/updates") as websocket:
+        response = client.post("/commit/i1")
+        message = websocket.receive_json()
+
+    assert response.status_code == 200
+    assert message["type"] == "graph_update"
+    assert message["interaction_id"] == "i1"
+    assert message["summary"]["persons"] == 1

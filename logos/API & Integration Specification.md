@@ -779,5 +779,39 @@ o	GET /api/v1/alerts.
 6.	Admin & Ops
 o	GET /api/v1/health.
 o	GET /api/v1/config/domain.
-This specification is consistent with the SRS, SAD, and graph schema, and gives you a clean, stable surface for both the first Stakeholder Engagement UI and any future tools that plug into LOGOS Core.
 
+________________________________________
+10. Real-time Updates & Collaboration
+LOGOS uses a WebSocket channel to push graph changes to connected clients so multiple analysts stay in sync without manual refreshes.
+•	Path: /ws/updates
+•	Protocol: WebSocket, JSON messages.
+•	Access: same auth boundary as the HTTP API (follow the deployment’s auth model).
+•	Message shape (example):
+{
+  "type": "graph_update",
+  "interaction_id": "ix_123",
+  "committed_at": "2025-03-21T04:15:00Z",
+  "interaction": { /* interaction metadata from the commit */ },
+  "entities": {
+    "orgs": [{ "id": "o_acme", "name": "Acme Pty Ltd" }],
+    "persons": [{ "id": "p_jane_smith", "name": "Jane Smith", "org_id": "o_acme" }],
+    "commitments": [{ "id": "c_001", "text": "Deliver SOC2 report" }],
+    "...": []
+  },
+  "relationships": [
+    { "src": "p_jane_smith", "dst": "pr_soc2", "rel": "INVOLVED_IN" },
+    { "src": "ix_123", "dst": "p_jane_smith", "rel": "MENTIONS" }
+  ],
+  "summary": {
+    "orgs": 1,
+    "persons": 1,
+    "commitments": 1,
+    "relationships": 2
+  }
+}
+Client behaviour:
+•	Subscribe once on page/session load.
+•	Update in-memory stores and visualisations (stakeholder 360, project maps, risk/issue lists, concepts) incrementally when messages arrive.
+•	Handle reconnect/backoff gracefully; if disconnected, fall back to manual refresh until reconnected.
+
+This specification is consistent with the SRS, SAD, and graph schema, and gives you a clean, stable surface for both the first Stakeholder Engagement UI and any future tools that plug into LOGOS Core.
