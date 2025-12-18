@@ -30,6 +30,11 @@ The knowledgebase is the control layer for LOGOS Core. It:
 •	Provides rule and threshold parameters for scoring and alerts.
 •	Holds learned parameters that change as the system adapts.
 The codebase should be as generic as possible; the knowledgebase should hold domain-specific logic.
+The knowledgebase is **readable and writable**:
+•	Pipelines update usage_frequency and last_seen_at for schema elements as they are exercised.
+•	New Forms/Concepts/relationship templates can be appended by agents or users (with change-log entries capturing introduction_version and added_by).
+•	Feedback-driven prompt/rule adjustments are written back to YAML so learning persists across runs.
+•	Write-backs preserve formatting and are reviewed in version control; the system never assumes the files are static initialisation data.
 ________________________________________
 3. Physical Structure
 Recommended directory layout (under logos/knowledgebase/):
@@ -64,10 +69,21 @@ o	memory.yml
 o	tiers.yml // rule_only | local_ml | local_llm per task
 •	workflows/
 o	pipelines.yml // pipeline definitions (IDs, stages)
+•	schema/
+o	node_types.yml // dynamic node labels, properties, concept affinities, usage stats
+o	relationship_types.yml // relationship types, properties, usage stats
+o	inference.yml // property-to-relationship inference rules for auto-linking
+o	rules.yml // schema evolution thresholds (deprecation, success floors)
 •	versioning/
-o	schema_version.yml
+o	schema.yml // schema version and last_updated timestamp
 o	changelog.md
 This structure must be stable so the pipelines and services can reliably load the right pieces.
+________________________________________
+3.1 Versioning and write-back (reflexive knowledgebase)
+•	Every knowledge file now carries a metadata block (version, updated_at, updated_by) so runtime writes can be traced.
+•	The KnowledgebaseStore (logos/knowledgebase/store.py) handles all writes with file locks to avoid race conditions and appends a changelog entry to logos/knowledgebase/versioning/changelog.yml.
+•	Schema evolution is persisted under logos/knowledgebase/schema/ (node_types.yml and relationship_types.yml). New node or relationship types observed at runtime must be appended with version metadata and a changelog entry.
+•	Pipelines route post-extraction learning through the sync_knowledgebase stage so that lexicon, concept, and schema updates are serialised instead of ad hoc file edits.
 ________________________________________
 4. Domain Profiles
 A domain profile bundles everything for a particular use case.
@@ -125,6 +141,7 @@ ________________________________________
 5. Forms, Concepts, Topics
 5.1 Forms (concepts/forms.yml)
 Defines the core Forms LOGOS reasons about.
+•	The list below is the current seed for the stakeholder_engagement profile; new Forms can be added or deprecated at runtime with metadata (introduction_version, usage_frequency, deprecated flag).
 forms:
   - id: form_stakeholder
     name: "Stakeholder"

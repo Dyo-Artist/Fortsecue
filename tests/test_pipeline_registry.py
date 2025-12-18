@@ -1,3 +1,4 @@
+from logos.knowledgebase import KnowledgebaseStore
 from logos.workflows import (
     PipelineConfigError,
     PipelineNotFound,
@@ -14,6 +15,7 @@ def test_load_pipeline_config_reads_yaml_registry():
         "logos.workflows.stages.require_raw_input",
         "logos.workflows.stages.tokenise_text",
         "logos.workflows.stages.apply_extraction",
+        "logos.workflows.stages.sync_knowledgebase",
         "logos.workflows.stages.build_preview_payload",
     ]
     assert pipelines["commit_interaction"] == [
@@ -28,8 +30,13 @@ def test_load_pipeline_config_reads_yaml_registry():
     ]
 
 
-def test_run_pipeline_executes_stages_in_order():
-    context: dict[str, object] = {"interaction_id": "test1", "interaction_type": "document"}
+def test_run_pipeline_executes_stages_in_order(tmp_path):
+    updater = KnowledgebaseStore(base_path=tmp_path / "kb", actor="tester")
+    context: dict[str, object] = {
+        "interaction_id": "test1",
+        "interaction_type": "document",
+        "knowledge_updater": updater,
+    }
     raw_bundle = RawInputBundle(text="Alice meets Bob about project Apollo", source_uri="memo-001")
 
     result = run_pipeline("ingest_preview", raw_bundle, context)
@@ -43,6 +50,7 @@ def test_run_pipeline_executes_stages_in_order():
         "require_raw_input",
         "tokenise_text",
         "apply_extraction",
+        "sync_knowledgebase",
         "build_preview_payload",
     ]
 

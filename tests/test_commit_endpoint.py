@@ -7,6 +7,8 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 
 from logos import main
+from logos.graphio.schema_store import SchemaStore
+from logos.workflows import stages
 
 
 class DummyTx:
@@ -62,10 +64,17 @@ def _seed_preview():
     }
 
 
-def test_commit_endpoint_runs_upsert_bundle(monkeypatch):
+def test_commit_endpoint_runs_upsert_bundle(monkeypatch, tmp_path):
     client = TestClient(main.app)
     dummy_client = DummyClient()
     monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    tmp_schema = SchemaStore(
+        tmp_path / "node_types.yml",
+        tmp_path / "relationship_types.yml",
+        tmp_path / "rules.yml",
+        tmp_path / "version.yml",
+    )
+    monkeypatch.setattr(stages, "SCHEMA_STORE", tmp_schema)
     _seed_preview()
 
     response = client.post("/commit/i1")
@@ -75,7 +84,7 @@ def test_commit_endpoint_runs_upsert_bundle(monkeypatch):
     assert body["interaction_id"] == "i1"
     assert body["counts"]["persons"] == 1
     assert any("MENTIONS" in cypher for cypher, _ in dummy_client.tx.calls)
-    assert any(call[1].get("org_id") == "org1" for call in dummy_client.tx.calls)
+    assert any(call[1].get("props", {}).get("org_id") == "org1" for call in dummy_client.tx.calls)
     assert "i1" not in main.PENDING_INTERACTIONS
 
 
@@ -84,3 +93,19 @@ def test_commit_endpoint_returns_404_for_missing_preview():
     response = client.post("/commit/unknown")
     assert response.status_code == 404
     assert response.json() == {"detail": "interaction not found"}
+
+
+def test_commit_broadcasts_updates(monkeypatch):
+    client = TestClient(main.app)
+    dummy_client = DummyClient()
+    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    _seed_preview()
+
+    with client.websocket_connect("/ws/updates") as websocket:
+        response = client.post("/commit/i1")
+        message = websocket.receive_json()
+
+    assert response.status_code == 200
+    assert message["type"] == "graph_update"
+    assert message["interaction_id"] == "i1"
+    assert message["summary"]["persons"] == 1

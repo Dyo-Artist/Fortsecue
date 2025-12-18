@@ -13,6 +13,7 @@ from jinja2 import Template, TemplateError
 
 from logos.interfaces.ollama_client import OllamaError, call_llm
 from logos.model_tiers import TierConfigError, get_task_tier
+from logos.knowledgebase import KnowledgebaseStore, KnowledgebaseWriteError
 
 PROMPT_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "prompts" / "extraction_interaction.yml"
 EXTRACTION_TASK_ID = "extraction_interaction"
@@ -258,9 +259,10 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
     return data
 
 
-def extract_all(text: str) -> Dict[str, Any]:
+def extract_all(text: str, *, knowledge_updater: KnowledgebaseStore | None = None) -> Dict[str, Any]:
     """Extract entities, relationships, and sentiment from raw text."""
     tier_chain: List[str]
+    result: Dict[str, Any] | None = None
     try:
         selection = get_task_tier(EXTRACTION_TASK_ID)
         tier_chain = [selection.tier]
@@ -275,10 +277,12 @@ def extract_all(text: str) -> Dict[str, Any]:
 
     for tier in tier_chain:
         if tier == "rule_only":
-            return _regex_extract_all(text)
+            result = _regex_extract_all(text)
+            break
         if tier == "local_llm":
             try:
-                return _ollama_extract_all(text)
+                result = _ollama_extract_all(text)
+                break
             except (OllamaError, json.JSONDecodeError, ValueError, KeyError, PromptConfigError) as exc:
                 LOGGER.info("Local LLM extraction failed; attempting fallback: %s", exc)
                 continue
@@ -288,4 +292,13 @@ def extract_all(text: str) -> Dict[str, Any]:
 
         LOGGER.warning("Unknown extraction tier '%s'; falling back", tier)
 
-    return _regex_extract_all(text)
+    if result is None:
+        result = _regex_extract_all(text)
+
+    if knowledge_updater is not None:
+        try:
+            knowledge_updater.learn_from_extraction(result)
+        except KnowledgebaseWriteError as exc:
+            LOGGER.warning("Unable to persist learned knowledge: %s", exc)
+
+    return result

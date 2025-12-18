@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -7,11 +8,19 @@ from uuid import uuid4
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
 from logos.memory import MemoryManager
+from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
+from logos.services.sync import build_graph_update_event
+from logos.knowledgebase import KnowledgebaseStore, KnowledgebaseWriteError
 
 from .bundles import ExtractionBundle, ParsedContentBundle, PipelineBundle, RawInputBundle
+
+logger = logging.getLogger(__name__)
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _trace(context: Dict[str, Any], stage_name: str) -> None:
@@ -123,6 +132,44 @@ def apply_extraction(
         metadata=metadata,
         extraction=extraction,
     )
+
+
+def sync_knowledgebase(bundle: ExtractionBundle, context: Dict[str, Any] | None = None) -> ExtractionBundle:
+    """Persist newly learned patterns, concepts, or schema elements into the knowledgebase."""
+
+    if context is None:
+        context = {}
+    _trace(context, "sync_knowledgebase")
+
+    if not isinstance(bundle, ExtractionBundle):
+        raise TypeError("Knowledgebase sync expects an ExtractionBundle")
+
+    updater = context.get("knowledge_updater")
+    if not isinstance(updater, KnowledgebaseStore):
+        base_path = context.get("knowledgebase_path")
+        actor = context.get("actor") or context.get("user") or "system"
+        updater = KnowledgebaseStore(base_path=base_path, actor=str(actor))
+
+    updates: dict[str, list[str]] = {"lexicon_updates": [], "concept_updates": [], "schema_updates": []}
+    try:
+        updates = updater.learn_from_extraction(bundle.extraction, source_uri=bundle.source_uri)
+
+        schema_updates = context.get("schema_updates") if isinstance(context.get("schema_updates"), dict) else {}
+        for node_type in schema_updates.get("node_types", []):
+            if isinstance(node_type, dict):
+                added = updater.add_node_type(node_type, reason="Schema evolution from pipeline")
+                if added:
+                    updates.setdefault("schema_updates", []).append(node_type.get("id") or node_type.get("label", ""))
+        for rel_type in schema_updates.get("relationship_types", []):
+            if isinstance(rel_type, dict):
+                added = updater.add_relationship_type(rel_type, reason="Schema evolution from pipeline")
+                if added:
+                    updates.setdefault("schema_updates", []).append(rel_type.get("type") or rel_type.get("rel", ""))
+    except KnowledgebaseWriteError as exc:
+        LOGGER.warning("Knowledgebase sync failed: %s", exc)
+
+    context["knowledgebase_updates"] = updates
+    return bundle
 
 
 def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -252,25 +299,27 @@ def upsert_interaction_bundle_stage(
 
     client_factory = context.get("graph_client_factory") or get_client
     commit_time = context.get("commit_time") or datetime.now(timezone.utc)
+    schema_store = context.get("schema_store", SCHEMA_STORE)
 
     client = client_factory()
 
     def _tx(tx):
-        upsert_interaction_bundle(tx, bundle, commit_time)
+        upsert_interaction_bundle(tx, bundle, commit_time, schema_store=schema_store)
 
     client.run_in_tx(_tx)
+
+    try:
+        update_builder = context.get("graph_update_builder", build_graph_update_event)
+        if callable(update_builder):
+            graph_updates = context.setdefault("graph_updates", [])
+            graph_updates.append(update_builder(bundle, commit_time))
+    except Exception:  # pragma: no cover - defensive guard to avoid breaking commit flow
+        logger.exception("Failed to build graph update event for interaction %s", bundle.interaction.id)
 
     return {
         "status": "committed",
         "interaction_id": bundle.interaction.id,
-        "counts": {
-            "orgs": len(bundle.entities.orgs),
-            "persons": len(bundle.entities.persons),
-            "projects": len(bundle.entities.projects),
-            "contracts": len(bundle.entities.contracts),
-            "topics": len(bundle.entities.topics),
-            "commitments": len(bundle.entities.commitments),
-        },
+        "counts": _summarise_counts(bundle),
     }
 
 
@@ -306,3 +355,8 @@ def consolidate_memory_stage(manager: MemoryManager, context: Dict[str, Any] | N
     persist_fn = persist_candidate if callable(persist_candidate) else None
 
     return manager.consolidate(session_id=session_key, now=now, persist_fn=persist_fn)
+def _summarise_counts(bundle: InteractionBundle) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for node in bundle.nodes:
+        counts[node.label.lower() + "s"] = counts.get(node.label.lower() + "s", 0) + 1
+    return counts

@@ -10,7 +10,7 @@ This document describes the system architecture for LOGOS, including:
 It defines how components are structured, how they interact, and how the system will be deployed and evolved.
 1.2 Scope
 This architecture covers:
-•	Single-machine local deployment (developer workstation or local server).
+•	Single-machine local deployment (developer workstation or local server) with multiple concurrent users coordinated through a local-first sync channel.
 •	Logical and physical components required for the Stakeholder Engagement MVP.
 •	Reuse patterns so LOGOS Core can power other applications (contracts, ESG, governance, etc.).
 Multi-tenant SaaS, complex RBAC, and large-scale distributed deployments are out of scope for MVP but the design should not preclude them.
@@ -91,6 +91,7 @@ o	Structured configuration and prompt templates:
 	Model selection (rule-only vs ML vs LLM).
 	Domain ontologies and patterns.
 	Thresholds for alerts and scoring.
+	Dynamic schema definitions (node/relationship templates with metadata) that are readable and writable at runtime.
 5.	Persistence Layer
 o	Neo4j as graph store (Forms/Concepts/Particulars/Agents).
 o	Small local stores (e.g. SQLite/JSON/YAML files) for:
@@ -114,6 +115,9 @@ o	Deduplicates entities and links mentions to canonical graph nodes.
 •	GraphIO / Neo4j Client (logos/graphio/)
 o	Upserts nodes and relationships in Neo4j with provenance.
 o	Provides search and graph queries wrapped in Python + HTTP APIs.
+•	Sync & Collaboration Service (event bus + WebSocket)
+o	Publishes commit/concept/alert updates to connected clients and agents.
+o	Ensures multi-user views stay consistent in local-first deployments.
 •	Reasoning Engine (logos/reasoning/)
 o	Computes influence, risk scores, and path-based explanations.
 o	Provides ranked stakeholder/projects/commitments results.
@@ -145,6 +149,10 @@ o	Pinned items bypass decay; repeated use refreshes TTL and increases strength.
 o	Neo4j graph and knowledgebase files remain the durable store. Promotion requires threshold satisfaction or user confirmation; large narratives are summarised before persistence to manage storage cost.
 •	MemoryConsolidationPipeline
 o	A periodic pipeline (workflows/pipelines.yml) that moves items short → mid → long term, evicts expired entries, and invokes graph upserts/archival based on promotion and demotion thresholds.
+5.	GraphIO upserts an Interaction node and all related nodes/edges into Neo4j using dynamic schema definitions from the knowledgebase.
+6.	Knowledgebase Persist records schema usage/changes; the Sync & Collaboration Service broadcasts updates so other users/agents refresh their views.
+7.	Alerting Service and Reasoning Engine react to new graph data and broadcast alert/score changes when relevant.
+8.	Users query via search, stakeholder view, or graph views; Reasoning Engine and Search Service respond using Neo4j.
 ________________________________________
 5. Logical View
 5.1 Logical Modules
@@ -184,11 +192,11 @@ o	Optionally orchestrates LLM calls via logos/llm_client.py.
 o	Web templates / React assets.
 o	Simple graph visualisations and tables.
 5.2 Core Domain Objects
-•	Forms: Person, Organisation, Project, Contract, Topic, Commitment, Interaction, Issue, Risk, Outcome, Document, Policy.
-•	Concepts: Domain-specific refinements (e.g. “Community Stakeholder”, “Regulator”, “Critical Commitment”).
-•	Particulars: Concrete instances (Jane Doe, Acme Pty Ltd, Project X).
+•	Forms: defined in the knowledgebase; seed Forms include Stakeholder, Organisation, Project, Contract, Topic, Commitment, Interaction, Issue, Risk, Outcome, Document, Policy, but new Forms can be added at runtime.
+•	Concepts: Domain-specific refinements (e.g. “Community Stakeholder”, “Regulator”, “Critical Commitment”), sourced from editable YAML.
+•	Particulars: Concrete instances (Jane Doe, Acme Pty Ltd, Project X) that reference Concepts dynamically via INSTANCE_OF.
 •	Agents: AI agents acting on behalf of users; modelled as nodes with relationships to users and knowledge.
-Each has associated relationships as per SRS (WORKS_FOR, INVOLVED_IN, PARTY_TO, MADE, RELATES_TO, MENTIONS, INFLUENCES, etc.).
+Each has associated relationships per the active schema definitions (e.g. WORKS_FOR, INVOLVED_IN, MADE, RELATES_TO, MENTIONS, INFLUENCES), which may grow as the knowledgebase evolves.
 5.3 Knowledgebase Structures
 •	Prompt templates keyed by:
 o	Task type (summary, extraction, risk explanation, report).
@@ -204,13 +212,14 @@ ________________________________________
 2.	API stores file and creates a temporary Interaction placeholder.
 3.	Ingestion Service parses text and passes to NLP Extraction.
 4.	NLP Extraction returns entities, relationships, commitments, sentiment.
-5.	Normalisation resolves entities against Neo4j.
-6.	System stores a preview bundle (in memory or a small store) keyed by interaction_id.
+5.	Normalisation resolves entities against Neo4j with contextual, revisable identity matches.
+6.	System stores a preview bundle (short-term) keyed by interaction_id.
 7.	UI retrieves /preview/{interaction_id} and renders extracted items for review.
 8.	User edits/removes entries and confirms.
-9.	/commit/{interaction_id} builds a graph upsert bundle and calls GraphIO.
-10.	GraphIO executes transactional MERGEs in Neo4j.
-11.	Alerting Service may run immediately for new Interaction or on a periodic schedule.
+9.	/commit/{interaction_id} builds a graph upsert bundle using dynamic schema definitions from the knowledgebase and calls GraphIO.
+10.	GraphIO executes transactional MERGEs in Neo4j; Knowledgebase Persist updates schema usage/definitions when new types were approved.
+11.	Sync & Collaboration Service broadcasts the commit and any schema changes to connected clients/agents.
+12.	Alerting/Reasoning may run immediately for new Interaction or on a periodic schedule and broadcast alert changes.
 6.2 Audio Ingestion
 1.	User uploads audio via /ingest/audio.
 2.	Ingestion Service delegates to Transcription Service.

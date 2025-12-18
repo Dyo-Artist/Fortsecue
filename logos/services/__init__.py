@@ -2,4 +2,5 @@
 
 __all__ = [
     "transcription",
+    "sync",
 ]

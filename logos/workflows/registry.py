@@ -24,6 +24,8 @@ class StageResolutionError(RuntimeError):
 def _coerce_pipeline_mapping(raw: Mapping[str, Any]) -> Dict[str, List[str]]:
     pipelines: Dict[str, List[str]] = {}
     for pipeline_id, stages in raw.items():
+        if pipeline_id == "metadata":
+            continue
         if not isinstance(stages, Iterable) or isinstance(stages, (str, bytes)):
             raise PipelineConfigError("Each pipeline must be a list of stage function names")
         str_stages: List[str] = []
@@ -100,4 +102,3 @@ __all__ = [
     "load_pipeline_config",
     "run_pipeline",
 ]
-

@@ -1,6 +1,16 @@
-# Lexicon of obligation phrases used to detect commitments in rule-only extraction.
-# Each entry may specify a regex pattern and optional regex flags.
+metadata:
+  version: 0.0.3
+  updated_at: '2025-12-17T10:27:43.008644+00:00'
+  updated_by: system
 patterns:
-  - regex: "\\b(?:will|shall)\\b[^.]*?\\bby\\s+[^\\.\\n]+"
-    flags:
-      - IGNORECASE
+- regex: \b(?:will|shall)\b[^.]*?\bby\s+[^\.\n]+
+  flags:
+  - IGNORECASE
+- regex: will\ send\ the\ report\ to\ Acme\ Pty\ Ltd\ by\ 2023\-09\-30
+  added_on: '2025-12-17T10:27:42.982417+00:00'
+  added_by: system
+  added_in_version: 0.0.2
+- regex: will\ deliver\ the\ SOC2\ report\ by\ 30\ Sep
+  added_on: '2025-12-17T10:27:43.008644+00:00'
+  added_by: system
+  added_in_version: 0.0.3

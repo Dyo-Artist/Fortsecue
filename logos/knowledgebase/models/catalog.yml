@@ -1,5 +1,10 @@
 # Model registry for LOGOS tasks and tiers.
 # Each task can define models per tier; defaults apply when task-specific entries are missing.
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 defaults:
   rule_only:
     name: "rule_engine"

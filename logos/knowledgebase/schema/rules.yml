@@ -1,0 +1,4 @@
+usage_deprecation:
+  min_usage: 1
+  stale_after_days: 180
+success_floor: 0.2
