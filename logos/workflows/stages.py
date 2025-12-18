@@ -10,9 +10,12 @@ from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interac
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
+from logos.services.sync import build_graph_update_event
 from logos.knowledgebase import KnowledgebaseStore, KnowledgebaseWriteError
 
 from .bundles import ExtractionBundle, ParsedContentBundle, PipelineBundle, RawInputBundle
+
+logger = logging.getLogger(__name__)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -273,6 +276,14 @@ def upsert_interaction_bundle_stage(
         upsert_interaction_bundle(tx, bundle, commit_time, schema_store=schema_store)
 
     client.run_in_tx(_tx)
+
+    try:
+        update_builder = context.get("graph_update_builder", build_graph_update_event)
+        if callable(update_builder):
+            graph_updates = context.setdefault("graph_updates", [])
+            graph_updates.append(update_builder(bundle, commit_time))
+    except Exception:  # pragma: no cover - defensive guard to avoid breaking commit flow
+        logger.exception("Failed to build graph update event for interaction %s", bundle.interaction.id)
 
     return {
         "status": "committed",
