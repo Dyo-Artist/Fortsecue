@@ -20,6 +20,19 @@ Out of scope: low-level Neo4j deployment details (covered in SAD / runbook).
 •	Provenance-first: every fact traceable back to sources and processing versions.
 •	Socratic: support “why” chains via explainable paths and derived edges (influence, risk, etc.).
 •	Stable IDs: deterministic or stable IDs to allow idempotent upserts.
+•	Self-describing schema: LOGOS reads node/relationship definitions from `logos/knowledgebase/schema/*.yml` and evolves them at runtime (usage counts, deprecation flags, inferred properties). New labels and relationship types must be registered here, not hardcoded.
+1.4 Schema Source of Truth and Evolution
+•	Node and relationship type definitions, allowed properties, and concept affinities live in YAML under `logos/knowledgebase/schema/`:
+  •	`node_types.yml` – labels, properties, concept_kind, version metadata, usage counts, deprecation flags.
+  •	`relationship_types.yml` – relationship types, properties, usage metadata, deprecation flags.
+  •	`inference.yml` – property-driven relationship inference rules (e.g., `org_id` ⇒ `WORKS_FOR`).
+  •	`rules.yml` – deprecation thresholds (staleness, success score floors).
+  •	Schema version is tracked in `logos/knowledgebase/versioning/schema.yml` and is incremented automatically when new labels/relationships are introduced.
+•	LOGOS must treat these YAML files as the canonical schema registry:
+  •	At startup, load them to configure indexes and validation.
+  •	When encountering a new label/relationship, append it to the YAML (usage_count starts at 1, last_used set to processing time) and bump the schema version.
+  •	Mark rarely used or low-success entries as `deprecated: true` according to `rules.yml` instead of deleting them in code.
+•	All Cypher upserts must be driven by this registry—no fixed `_ALLOWED_RELATIONSHIPS` sets or label-specific upsert functions.
 ________________________________________
 2. Conceptual Knowledge Model
 LOGOS uses four main conceptual layers:
@@ -614,4 +627,3 @@ OPTIONAL MATCH (cont:Contract {id: $contract_id})
 FOREACH (_ IN CASE WHEN cont IS NULL THEN [] ELSE [1] END |
   MERGE (c)-[:RELATES_TO]->(cont)
 );
-

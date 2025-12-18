@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 from uuid import uuid4
 
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
-from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
+from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
@@ -222,24 +222,24 @@ def upsert_interaction_bundle_stage(
 
     client_factory = context.get("graph_client_factory") or get_client
     commit_time = context.get("commit_time") or datetime.now(timezone.utc)
+    schema_store = context.get("schema_store", SCHEMA_STORE)
 
     client = client_factory()
 
     def _tx(tx):
-        upsert_interaction_bundle(tx, bundle, commit_time)
+        upsert_interaction_bundle(tx, bundle, commit_time, schema_store=schema_store)
 
     client.run_in_tx(_tx)
 
     return {
         "status": "committed",
         "interaction_id": bundle.interaction.id,
-        "counts": {
-            "orgs": len(bundle.entities.orgs),
-            "persons": len(bundle.entities.persons),
-            "projects": len(bundle.entities.projects),
-            "contracts": len(bundle.entities.contracts),
-            "topics": len(bundle.entities.topics),
-            "commitments": len(bundle.entities.commitments),
-        },
+        "counts": _summarise_counts(bundle),
     }
 
+
+def _summarise_counts(bundle: InteractionBundle) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    for node in bundle.nodes:
+        counts[node.label.lower() + "s"] = counts.get(node.label.lower() + "s", 0) + 1
+    return counts

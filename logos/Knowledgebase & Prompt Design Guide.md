@@ -63,8 +63,13 @@ o	scores.yml
 o	tiers.yml // rule_only | local_ml | local_llm per task
 •	workflows/
 o	pipelines.yml // pipeline definitions (IDs, stages)
+•	schema/
+o	node_types.yml // dynamic node labels, properties, concept affinities, usage stats
+o	relationship_types.yml // relationship types, properties, usage stats
+o	inference.yml // property-to-relationship inference rules for auto-linking
+o	rules.yml // schema evolution thresholds (deprecation, success floors)
 •	versioning/
-o	schema_version.yml
+o	schema.yml // schema version and last_updated timestamp
 o	changelog.md
 This structure must be stable so the pipelines and services can reliably load the right pieces.
 ________________________________________
@@ -576,4 +581,3 @@ o	Do alerts have acceptable precision?
 4.	Merge and deploy.
 5.	LOGOS loads new knowledgebase version on restart or via a reload command.
 The learning loops (Section 6 in Pipeline doc) should log any automatic parameter changes back into a machine-readable file and, for sensitive thresholds, into a human-readable audit log.
-
