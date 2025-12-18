@@ -1,0 +1,33 @@
+short_term:
+  # Default TTL for ephemeral reasoning traces and session-scoped context (in seconds).
+  default_ttl_seconds: 3600
+  # Cap short-term entries per session to avoid unbounded growth.
+  max_items_per_session: 100
+  # Promote short-term items to mid-term when their importance meets or exceeds this threshold.
+  promotion_importance_threshold: 0.7
+
+mid_term:
+  # Default TTL for intermediate records such as justifications kept for debugging or follow-up (in seconds).
+  default_ttl_seconds: 604800
+  # Increment applied when a mid-term item is referenced or refreshed.
+  reinforcement_increment: 1.0
+  # Promote to long-term if strength meets or exceeds this value.
+  promotion_strength_threshold: 3.0
+  # Promote to long-term if importance meets or exceeds this value, even without strength.
+  importance_promotion_threshold: 0.85
+  # Optional TTL override for pinned items (null means do not expire pinned items).
+  pinned_ttl_seconds: null
+
+long_term:
+  # Maximum character length to persist; longer content will be summarised before persistence.
+  summary_max_chars: 2000
+  # Require explicit confirmation before persisting to the graph or knowledgebase.
+  require_confirmation: true
+  # Demotion threshold for outdated or incorrect items. Items below this score should be deprecated or archived.
+  demotion_score_threshold: -1.0
+
+consolidation:
+  # Batch size for periodic consolidation runs (short -> mid -> long term).
+  promotion_batch_size: 50
+  # Whether to automatically pin critical justifications flagged by users.
+  pin_user_flagged: true

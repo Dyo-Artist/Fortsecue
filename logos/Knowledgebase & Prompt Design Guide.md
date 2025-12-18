@@ -59,6 +59,7 @@ o	agent_briefing.yml
 •	rules/
 o	alerts.yml
 o	scores.yml
+o	memory.yml
 •	models/
 o	tiers.yml // rule_only | local_ml | local_llm per task
 •	workflows/
@@ -112,6 +113,7 @@ prompts:
 rules:
   alerts: "../rules/alerts.yml"
   scores: "../rules/scores.yml"
+  memory: "../rules/memory.yml"
 
 models:
   tiers: "../models/tiers.yml"
@@ -488,7 +490,7 @@ alerts:
         min: 2
         max: 10
         learning: "feedback_regression"
-8.2 Scores (rules/scores.yml)
+ 8.2 Scores (rules/scores.yml)
 risk_scores:
   stakeholder:
     description: "Stakeholder risk score based on commitments, sentiment, issues."
@@ -508,6 +510,28 @@ risk_scores:
         min: 0.1
         max: 0.5
         learning: "manual"
+8.3 Memory Rules (rules/memory.yml)
+memory:
+  short_term:
+    description: "Volatile context for a session/pipeline; default TTL and per-session cap control working memory."
+    params:
+      default_ttl_seconds: "Set in YAML; code should not hard-code this value."
+      max_items_per_session: "Limits short-term footprint."
+      promotion_importance_threshold: "Importance needed to move into mid-term staging."
+  mid_term:
+    description: "Staging cache for unconfirmed insights and justifications with decay and reinforcement."
+    params:
+      default_ttl_seconds: "Duration before eviction unless reinforced."
+      reinforcement_increment: "Strength bump each time the item is referenced."
+      promotion_strength_threshold: "Strength needed to become a long-term candidate."
+      importance_promotion_threshold: "Importance needed to promote even without repeated reinforcement."
+      pinned_ttl_seconds: "Optional override for pinned items; null disables expiry."
+  long_term:
+    description: "Persistence rules for Neo4j/knowledgebase."
+    params:
+      summary_max_chars: "Summarise large narratives before writing to the graph."
+      require_confirmation: "Whether user confirmation is needed for promotion."
+      demotion_score_threshold: "Scores below this can be deprecated/archived."
 Pipelines read these weights and can adjust them over time (within bounds) based on empirical performance.
 ________________________________________
 9. Model Tiers & Task Routing
@@ -576,4 +600,3 @@ o	Do alerts have acceptable precision?
 4.	Merge and deploy.
 5.	LOGOS loads new knowledgebase version on restart or via a reload command.
 The learning loops (Section 6 in Pipeline doc) should log any automatic parameter changes back into a machine-readable file and, for sensitive thresholds, into a human-readable audit log.
-

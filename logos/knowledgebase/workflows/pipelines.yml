@@ -9,3 +9,7 @@ commit_interaction:
   - logos.workflows.stages.resolve_entities_from_graph
   - logos.workflows.stages.build_interaction_bundle_stage
   - logos.workflows.stages.upsert_interaction_bundle_stage
+
+memory_consolidation:
+  - logos.workflows.stages.ensure_memory_manager
+  - logos.workflows.stages.consolidate_memory_stage

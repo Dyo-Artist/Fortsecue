@@ -134,6 +134,17 @@ o	Presents data to users and forwards requests to underlying services.
 5.	GraphIO upserts an Interaction node and all related nodes/edges into Neo4j.
 6.	Alerting Service updates alert state based on new graph data.
 7.	Users query via search, stakeholder view, or graph views; Reasoning Engine and Search Service respond using Neo4j.
+4.4 Memory Subsystem (Hippocampus-inspired)
+•	Short-term memory (volatile)
+o	Session/pipeline-scoped caches inside MemoryManager and bundles for reasoning traces and justifications.
+o	TTL and per-session caps configured in knowledgebase/rules/memory.yml; default behaviour is non-persistent unless explicitly retained.
+•	Mid-term memory (staging)
+o	Holds unconfirmed insights, meeting summaries, and reasoning chains with decay + reinforcement (strength/last_used) driven by memory.yml thresholds.
+o	Pinned items bypass decay; repeated use refreshes TTL and increases strength.
+•	Long-term memory (canonical)
+o	Neo4j graph and knowledgebase files remain the durable store. Promotion requires threshold satisfaction or user confirmation; large narratives are summarised before persistence to manage storage cost.
+•	MemoryConsolidationPipeline
+o	A periodic pipeline (workflows/pipelines.yml) that moves items short → mid → long term, evicts expired entries, and invokes graph upserts/archival based on promotion and demotion thresholds.
 ________________________________________
 5. Logical View
 5.1 Logical Modules
@@ -384,4 +395,3 @@ o	Multi-step governance processes.
 o	Tenant scoping at graph level (labels/properties).
 o	Strong auth and RBAC integration.
 o	Multi-node deployments across environments.
-
