@@ -6,7 +6,6 @@ from typing import Any, Dict, List
 from uuid import uuid4
 
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
-from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
 from logos.memory import MemoryManager
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
