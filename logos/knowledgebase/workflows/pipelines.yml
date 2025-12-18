@@ -1,7 +1,13 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 ingest_preview:
   - logos.workflows.stages.require_raw_input
   - logos.workflows.stages.tokenise_text
   - logos.workflows.stages.apply_extraction
+  - logos.workflows.stages.sync_knowledgebase
   - logos.workflows.stages.build_preview_payload
 
 commit_interaction:

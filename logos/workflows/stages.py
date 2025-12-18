@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
@@ -9,8 +10,12 @@ from logos.graphio.upsert import InteractionBundle, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
+from logos.knowledgebase import KnowledgebaseStore, KnowledgebaseWriteError
 
 from .bundles import ExtractionBundle, ParsedContentBundle, PipelineBundle, RawInputBundle
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _trace(context: Dict[str, Any], stage_name: str) -> None:
@@ -112,6 +117,44 @@ def apply_extraction(
         metadata=metadata,
         extraction=extraction,
     )
+
+
+def sync_knowledgebase(bundle: ExtractionBundle, context: Dict[str, Any] | None = None) -> ExtractionBundle:
+    """Persist newly learned patterns, concepts, or schema elements into the knowledgebase."""
+
+    if context is None:
+        context = {}
+    _trace(context, "sync_knowledgebase")
+
+    if not isinstance(bundle, ExtractionBundle):
+        raise TypeError("Knowledgebase sync expects an ExtractionBundle")
+
+    updater = context.get("knowledge_updater")
+    if not isinstance(updater, KnowledgebaseStore):
+        base_path = context.get("knowledgebase_path")
+        actor = context.get("actor") or context.get("user") or "system"
+        updater = KnowledgebaseStore(base_path=base_path, actor=str(actor))
+
+    updates: dict[str, list[str]] = {"lexicon_updates": [], "concept_updates": [], "schema_updates": []}
+    try:
+        updates = updater.learn_from_extraction(bundle.extraction, source_uri=bundle.source_uri)
+
+        schema_updates = context.get("schema_updates") if isinstance(context.get("schema_updates"), dict) else {}
+        for node_type in schema_updates.get("node_types", []):
+            if isinstance(node_type, dict):
+                added = updater.add_node_type(node_type, reason="Schema evolution from pipeline")
+                if added:
+                    updates.setdefault("schema_updates", []).append(node_type.get("id") or node_type.get("label", ""))
+        for rel_type in schema_updates.get("relationship_types", []):
+            if isinstance(rel_type, dict):
+                added = updater.add_relationship_type(rel_type, reason="Schema evolution from pipeline")
+                if added:
+                    updates.setdefault("schema_updates", []).append(rel_type.get("type") or rel_type.get("rel", ""))
+    except KnowledgebaseWriteError as exc:
+        LOGGER.warning("Knowledgebase sync failed: %s", exc)
+
+    context["knowledgebase_updates"] = updates
+    return bundle
 
 
 def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -242,4 +285,3 @@ def upsert_interaction_bundle_stage(
             "commitments": len(bundle.entities.commitments),
         },
     }
-

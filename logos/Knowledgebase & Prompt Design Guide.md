@@ -68,6 +68,12 @@ o	schema_version.yml
 o	changelog.md
 This structure must be stable so the pipelines and services can reliably load the right pieces.
 ________________________________________
+3.1 Versioning and write-back (reflexive knowledgebase)
+•	Every knowledge file now carries a metadata block (version, updated_at, updated_by) so runtime writes can be traced.
+•	The KnowledgebaseStore (logos/knowledgebase/store.py) handles all writes with file locks to avoid race conditions and appends a changelog entry to logos/knowledgebase/versioning/changelog.yml.
+•	Schema evolution is persisted under logos/knowledgebase/schema/ (node_types.yml and relationship_types.yml). New node or relationship types observed at runtime must be appended with version metadata and a changelog entry.
+•	Pipelines route post-extraction learning through the sync_knowledgebase stage so that lexicon, concept, and schema updates are serialised instead of ad hoc file edits.
+________________________________________
 4. Domain Profiles
 A domain profile bundles everything for a particular use case.
 Example: domain_profiles/stakeholder_engagement.yml
@@ -576,4 +582,3 @@ o	Do alerts have acceptable precision?
 4.	Merge and deploy.
 5.	LOGOS loads new knowledgebase version on restart or via a reload command.
 The learning loops (Section 6 in Pipeline doc) should log any automatic parameter changes back into a machine-readable file and, for sensitive thresholds, into a human-readable audit log.
-

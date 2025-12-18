@@ -1,6 +1,11 @@
 # Model tier routing for LOGOS tasks.
 # tier values: rule_only | local_ml | local_llm
 # fallback_tier is optional and used when the primary tier is unavailable.
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 tasks:
   extraction_interaction:
     tier: "local_llm"
