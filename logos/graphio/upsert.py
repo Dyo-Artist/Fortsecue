@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
