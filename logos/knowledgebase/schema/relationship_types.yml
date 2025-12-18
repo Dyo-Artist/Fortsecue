@@ -1,0 +1,99 @@
+metadata:
+  version: "0.0.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+relationship_types: []
+relationship_types:
+  ASSOCIATED_WITH:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  ASSISTS:
+    properties:
+      - created_by
+      - updated_by
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  IDENTIFIED_IN:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  INSTANCE_OF:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  INVOLVED_IN:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  INVOLVES:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  MADE:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  MENTIONS:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  PARTY_TO:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  RAISED_IN:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  RELATED_TO:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  RELATES_TO:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  RESULT_OF:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  RESULTS_IN:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  WORKS_FOR:
+    properties: []
+    introduced_in_version: 1
+    deprecated: false
+    usage_count: 0
+    last_used: null

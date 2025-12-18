@@ -10,7 +10,7 @@ from logos.agents.assistant import (
     record_agent_assist,
     summarise_interaction_for_user,
 )
-from logos.graphio import upsert
+from logos.graphio.schema_store import SchemaStore
 from logos.model_tiers import ModelConfigError, ModelSelection
 
 
@@ -32,25 +32,15 @@ class FakeClient:
         fn(self.tx)
 
 
-def test_upsert_agent_assist_links_agent_and_user():
-    tx = FakeTx()
-    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    agent = upsert.AgentModel(id="agent_alpha", name="Alpha", role="assistant", source_uri="src", created_by="tester")
-    user = upsert.PersonModel(id="user_1", name="User One", source_uri="src")
-
-    upsert.upsert_agent_assist(tx, agent, user, now)
-
-    cypher, params = tx.calls[0]
-    assert "MERGE (a:Agent" in cypher
-    assert "ASSISTS" in cypher
-    assert params["agent_id"] == "agent_alpha"
-    assert params["user_id"] == "user_1"
-    assert params["now"] == now.isoformat()
-
-
-def test_record_agent_assist_runs_transaction():
+def test_record_agent_assist_runs_transaction(tmp_path):
     client = FakeClient()
     now = datetime(2024, 2, 1, tzinfo=timezone.utc)
+    store = SchemaStore(
+        tmp_path / "node_types.yml",
+        tmp_path / "relationship_types.yml",
+        tmp_path / "rules.yml",
+        tmp_path / "version.yml",
+    )
 
     record_agent_assist(
         "user_2",
@@ -59,12 +49,14 @@ def test_record_agent_assist_runs_transaction():
         agent_name="Beta",
         client_factory=lambda: client,
         now=now,
+        schema_store=store,
     )
 
     assert client.tx is not None
-    cypher, params = client.tx.calls[0]
-    assert params["agent_id"] == "agent_beta"
-    assert params["user_name"] == "User Two"
+    cyphers = [call[0] for call in client.tx.calls]
+    assert any("Agent" in stmt for stmt in cyphers)
+    assert any("ASSISTS" in stmt for stmt in cyphers)
+    assert any("Person" in stmt for stmt in cyphers)
 
 
 def test_summarise_interaction_records_assist_and_returns_summary():

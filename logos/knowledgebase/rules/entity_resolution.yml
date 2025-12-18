@@ -1,11 +1,26 @@
 # Entity resolution scoring and thresholds for graph lookups
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 defaults:
   min_confidence: 0.9
+  candidate_floor: 0.5
+  max_alternates: 3
+  context:
+    project_score: 0.2
+    document_score: 0.15
+    location_score: 0.1
 
 org:
   name_score: 0.9
   domain_score: 1.0
   min_confidence: 0.9
+  candidate_floor: 0.5
+  context:
+    project_score: 0.25
+    location_score: 0.1
 
 person:
   email_score: 1.0
@@ -13,7 +28,15 @@ person:
   name_org_score: 0.92
   name_only_score: 0.6
   min_confidence: 0.9
+  candidate_floor: 0.5
+  context:
+    project_score: 0.25
+    document_score: 0.15
+    location_score: 0.1
 
 project:
   name_score: 0.9
   min_confidence: 0.9
+  candidate_floor: 0.5
+  context:
+    location_score: 0.15
