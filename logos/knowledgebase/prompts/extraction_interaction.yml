@@ -1,3 +1,8 @@
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 id: extraction_interaction
 task: extraction
 domain_profile: stakeholder_engagement

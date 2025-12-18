@@ -1,4 +1,9 @@
 # Similarity thresholds used during entity resolution and merge decisions
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
 defaults:
   name_similarity: 1.0
   org_similarity: 1.0
