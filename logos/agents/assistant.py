@@ -4,7 +4,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Callable
 
-from logos.graphio import upsert
+from logos.graphio.upsert import (
+    GraphNode,
+    GraphRelationship,
+    SCHEMA_STORE,
+    upsert_node,
+    upsert_relationship,
+)
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.model_tiers import ModelConfigError, ModelSelection, get_model_for
 
@@ -50,24 +56,42 @@ def record_agent_assist(
     actor_id: str | None = "logos_system",
     client_factory: Callable[[], object] = get_client,
     now: datetime | None = None,
+    schema_store: object | None = None,
 ) -> None:
     """Upsert the agent and link it to the requesting user with ASSISTS."""
 
     timestamp = now or datetime.now(timezone.utc)
     client = client_factory()
+    store = schema_store or SCHEMA_STORE
 
-    agent = upsert.AgentModel(
+    agent = GraphNode(
         id=agent_id,
-        name=agent_name,
-        role=agent_role,
+        label="Agent",
+        properties={"name": agent_name, "role": agent_role, "created_by": actor_id, "updated_by": actor_id},
+        concept_kind="AgentProfile",
         source_uri=source_uri,
-        created_by=actor_id,
-        updated_by=actor_id,
     )
-    user = upsert.PersonModel(id=user_id, name=user_name or user_id, source_uri=source_uri)
+    user = GraphNode(
+        id=user_id,
+        label="Person",
+        properties={"name": user_name or user_id},
+        concept_kind="StakeholderType",
+        source_uri=source_uri,
+    )
+    assists_rel = GraphRelationship(
+        src=agent_id,
+        dst=user_id,
+        rel="ASSISTS",
+        src_label="Agent",
+        dst_label="Person",
+        properties={"created_by": actor_id, "updated_by": actor_id},
+        source_uri=source_uri or "agent://logos",
+    )
 
     def _tx(tx):
-        upsert.upsert_agent_assist(tx, agent, user, timestamp)
+        upsert_node(tx, agent, timestamp, schema_store=store)
+        upsert_node(tx, user, timestamp, schema_store=store)
+        upsert_relationship(tx, assists_rel, source_uri or "agent://logos", timestamp, schema_store=store)
 
     client.run_in_tx(_tx)
 
