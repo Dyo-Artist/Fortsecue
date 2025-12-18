@@ -1,0 +1,53 @@
+property_relationships:
+  org_id:
+    rel: WORKS_FOR
+    target_label: Org
+    source_labels: [Person]
+  org_ids:
+    rel: PARTY_TO
+    target_label: Org
+    source_labels: [Contract]
+  owner_id:
+    rel: MADE
+    target_label: Person
+    source_labels: [Commitment]
+  relates_to_project_id:
+    rel: RELATES_TO
+    target_label: Project
+    source_labels: [Commitment]
+  relates_to_contract_id:
+    rel: RELATES_TO
+    target_label: Contract
+    source_labels: [Commitment]
+  relates_to_topic_ids:
+    rel: RELATED_TO
+    target_label: Topic
+    source_labels: [Issue, Risk]
+  relates_to_project_ids:
+    rel: RELATED_TO
+    target_label: Project
+    source_labels: [Issue, Risk]
+  related_risk_ids:
+    rel: RELATED_TO
+    target_label: Risk
+    source_labels: [Issue]
+  results_in_outcome_ids:
+    rel: RESULTS_IN
+    target_label: Outcome
+    source_labels: [Risk]
+  results_from_risk_ids:
+    rel: RESULT_OF
+    target_label: Risk
+    source_labels: [Outcome]
+  associated_project_ids:
+    rel: ASSOCIATED_WITH
+    target_label: Project
+    source_labels: [Outcome]
+  raised_in_interaction_id:
+    rel: RAISED_IN
+    target_label: Interaction
+    source_labels: [Issue]
+  identified_in_interaction_id:
+    rel: IDENTIFIED_IN
+    target_label: Interaction
+    source_labels: [Risk]

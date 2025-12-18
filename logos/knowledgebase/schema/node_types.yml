@@ -1,0 +1,159 @@
+node_types:
+  Agent:
+    properties:
+      - name
+      - role
+      - source_uri
+      - created_by
+      - updated_by
+    introduced_in_version: 1
+    concept_kind: AgentProfile
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Commitment:
+    properties:
+      - text
+      - due_date
+      - status
+      - source_uri
+      - relates_to_project_id
+      - relates_to_contract_id
+    introduced_in_version: 1
+    concept_kind: CommitmentType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Concept:
+    properties:
+      - name
+      - kind
+      - description
+      - metadata
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: Form
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Contract:
+    properties:
+      - name
+      - sap_id
+      - value
+      - start_date
+      - end_date
+      - org_ids
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: ContractType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Interaction:
+    properties:
+      - type
+      - at
+      - sentiment
+      - summary
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: InteractionType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Issue:
+    properties:
+      - title
+      - description
+      - category
+      - status
+      - severity
+      - relates_to_project_ids
+      - relates_to_topic_ids
+      - related_risk_ids
+      - raised_in_interaction_id
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: IssueCategory
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Org:
+    properties:
+      - name
+      - domain
+      - sector
+      - category
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: OrgCategory
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Outcome:
+    properties:
+      - title
+      - description
+      - type
+      - realised_date
+      - associated_project_ids
+      - results_from_risk_ids
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: OutcomeType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Person:
+    properties:
+      - name
+      - title
+      - email
+      - org_id
+      - type
+      - influence_score
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: StakeholderType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Project:
+    properties:
+      - name
+      - status
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: ProjectType
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Risk:
+    properties:
+      - title
+      - description
+      - category
+      - likelihood
+      - impact
+      - score
+      - status
+      - relates_to_project_ids
+      - relates_to_topic_ids
+      - results_in_outcome_ids
+      - identified_in_interaction_id
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: RiskCategory
+    deprecated: false
+    usage_count: 0
+    last_used: null
+  Topic:
+    properties:
+      - name
+      - source_uri
+    introduced_in_version: 1
+    concept_kind: TopicGroup
+    deprecated: false
+    usage_count: 0
+    last_used: null

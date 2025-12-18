@@ -33,6 +33,7 @@ def test_ensure_indexes_calls_expected_cypher(monkeypatch):
         "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Interaction) REQUIRE n.id IS UNIQUE",
     ]
 
-    constraint_calls = [c[0] for c in dummy.calls[:-1]]
-    assert constraint_calls == expected_constraints
-    assert "logos_name_idx" in dummy.calls[-1][0]
+    constraint_calls = [c[0] for c in dummy.calls if c[0].startswith("CREATE CONSTRAINT")]
+    for expected in expected_constraints:
+        assert expected in constraint_calls
+    assert any("logos_name_idx" in call[0] for call in dummy.calls)

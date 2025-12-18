@@ -11,6 +11,8 @@ except Exception:  # pragma: no cover - neo4j optional for tests
     GraphDatabase = None  # type: ignore
     Transaction = Any  # type: ignore
 
+from logos.graphio.schema_store import SchemaStore
+
 
 class GraphUnavailable(Exception):
     """Raised when the graph database is unavailable."""
@@ -121,22 +123,37 @@ def ensure_indexes() -> None:
     except GraphUnavailable:
         return
 
-    labels = [
-        "Person",
-        "Org",
-        "Project",
-        "Contract",
-        "Commitment",
-        "Interaction",
-    ]
+    try:
+        schema_store = SchemaStore(mutable=False)
+        labels = list(schema_store.node_types.keys()) or [
+            "Person",
+            "Org",
+            "Project",
+            "Contract",
+            "Commitment",
+            "Interaction",
+        ]
+    except Exception:
+        labels = [
+            "Person",
+            "Org",
+            "Project",
+            "Contract",
+            "Commitment",
+            "Interaction",
+        ]
     for label in labels:
         client.run(
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:%s) REQUIRE n.id IS UNIQUE" % label,
             {},
         )
-    client.run(
-        "CALL db.index.fulltext.createNodeIndex('logos_name_idx', ['Person','Org','Project','Contract','Commitment'], ['name'], { ifNotExists: true })"
-    )
+    name_index_labels = [label for label in labels if label in {"Person", "Org", "Project", "Contract", "Commitment"}]
+    if name_index_labels:
+        labels_literal = "','".join(name_index_labels)
+        client.run(
+            "CALL db.index.fulltext.createNodeIndex('logos_name_idx', ['%s'], ['name'], { ifNotExists: true })"
+            % labels_literal
+        )
 
 
 def ping() -> Dict[str, Any]:
