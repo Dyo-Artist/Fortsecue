@@ -1,12 +1,9 @@
 metadata:
-  version: "0.1.0"
-  updated_at: "2024-01-01T00:00:00Z"
-  updated_by: "system"
+  version: "0.1.1"
+  updated_at: "2025-12-20T00:00:00Z"
+  updated_by: "codex"
 
 topics:
-  - id: t_schedule
-    name: "Schedule"
-    description: "Timing, milestones, and delivery windows."
   - id: t_budget
     name: "Budget"
     description: "Financials, cost control, and funding."
@@ -16,3 +13,6 @@ topics:
   - id: t_governance
     name: "Governance"
     description: "Decision rights, approvals, and compliance."
+  - id: t_community
+    name: "Community"
+    description: "Community relations, local impacts, and social licence."

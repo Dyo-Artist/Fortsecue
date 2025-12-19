@@ -196,18 +196,18 @@ risk_categories:
     name: "ESG"
 5.3 Topics Taxonomy (topics/topics.yml)
 topics:
-  - id: t_schedule
-    name: "Schedule"
-    group: "Delivery"
-    synonyms: ["timeline", "delivery date", "milestones"]
-  - id: t_security
-    name: "Security"
-    group: "Risk"
-    synonyms: ["SOC2", "ISO 27001", "penetration test", "controls"]
+  - id: t_budget
+    name: "Budget"
+    description: "Financials, cost control, and funding."
+  - id: t_resources
+    name: "Resources"
+    description: "Staffing, skills, and availability."
+  - id: t_governance
+    name: "Governance"
+    description: "Decision rights, approvals, and compliance."
   - id: t_community
     name: "Community"
-    group: "ESG"
-    synonyms: ["local community", "traditional owners", "social licence"]
+    description: "Community relations, local impacts, and social licence."
 Topics are the bridge between literal words and Concept categories and can be evolved over time.
 ________________________________________
 6. Lexicons & Patterns
