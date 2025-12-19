@@ -259,7 +259,12 @@ def _ollama_extract_all(text: str) -> Dict[str, Any]:
     return data
 
 
-def extract_all(text: str, *, knowledge_updater: KnowledgebaseStore | None = None) -> Dict[str, Any]:
+def extract_all(
+    text: str,
+    *,
+    knowledge_updater: KnowledgebaseStore | None = None,
+    learning_signals: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
     """Extract entities, relationships, and sentiment from raw text."""
     tier_chain: List[str]
     result: Dict[str, Any] | None = None
@@ -298,6 +303,8 @@ def extract_all(text: str, *, knowledge_updater: KnowledgebaseStore | None = Non
     if knowledge_updater is not None:
         try:
             knowledge_updater.learn_from_extraction(result)
+            if learning_signals:
+                knowledge_updater.apply_learning_signals(learning_signals)
         except KnowledgebaseWriteError as exc:
             LOGGER.warning("Unable to persist learned knowledge: %s", exc)
 

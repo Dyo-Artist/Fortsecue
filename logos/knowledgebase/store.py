@@ -208,6 +208,25 @@ class KnowledgebaseStore:
             reason=reason or "Learned new obligation phrase",
         )
 
+    def add_lexicon_entry(
+        self,
+        *,
+        lexicon_name: str,
+        entry: Mapping[str, Any],
+        list_key: str = "patterns",
+        unique_fields: Iterable[str] | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        """Persist a generic lexicon entry so new patterns can be curated over time."""
+
+        return self._append_entry(
+            file_path=self.base_path / "lexicons" / lexicon_name,
+            list_key=list_key,
+            entry=entry,
+            unique_fields=unique_fields,
+            reason=reason or f"Updated lexicon {lexicon_name}",
+        )
+
     def add_concept(
         self,
         concept_set: str,
@@ -272,6 +291,53 @@ class KnowledgebaseStore:
             reason=reason or "Recorded session memory snapshot",
         )
 
+    def add_sentiment_override(
+        self,
+        term: str,
+        sentiment: Any,
+        *,
+        context: str | None = None,
+        lexicon_name: str = "sentiment_overrides.yml",
+        reason: str | None = None,
+    ) -> bool:
+        """Capture a sentiment override so domain terms can be re-weighted."""
+
+        entry: dict[str, Any] = {"term": term, "sentiment": sentiment}
+        if context:
+            entry["context"] = context
+
+        return self._append_entry(
+            file_path=self.base_path / "lexicons" / lexicon_name,
+            list_key="terms",
+            entry=entry,
+            unique_fields=["term", "context"],
+            reason=reason or "Captured sentiment override",
+        )
+
+    def record_learning_signal(
+        self,
+        signal_type: str,
+        payload: Mapping[str, Any],
+        *,
+        status: str = "pending",
+        reason: str | None = None,
+    ) -> bool:
+        """Log learning signals for offline curation without enforcing immediate writes."""
+
+        entry: dict[str, Any] = {
+            "type": signal_type,
+            "payload": dict(payload),
+            "status": status,
+        }
+
+        return self._append_entry(
+            file_path=self.base_path / "learning" / "signals.yml",
+            list_key="signals",
+            entry=entry,
+            unique_fields=["type", "payload"],
+            reason=reason or "Captured learning signal",
+        )
+
     def update_prompt_template(self, prompt_name: str, template: str, *, reason: str | None = None) -> str:
         path = self.base_path / "prompts" / prompt_name
         with self._file_lock(path):
@@ -300,11 +366,131 @@ class KnowledgebaseStore:
         )
         return new_version
 
+    def apply_learning_signals(self, signals: Mapping[str, Any] | None) -> dict[str, list[str]]:
+        """Apply structured learning signals to mutate lexicons or record curation tasks."""
+
+        updates: dict[str, list[str]] = {
+            "lexicon_updates": [],
+            "concept_updates": [],
+            "schema_updates": [],
+            "sentiment_updates": [],
+            "learning_signals": [],
+        }
+
+        if not isinstance(signals, Mapping):
+            return updates
+
+        lexicon_patterns = signals.get("lexicon_patterns")
+        if isinstance(lexicon_patterns, list):
+            for pattern in lexicon_patterns:
+                if isinstance(pattern, str):
+                    entry = {"regex": re.escape(pattern)}
+                    added = self.add_lexicon_entry(
+                        lexicon_name="obligation_phrases.yml",
+                        entry=entry,
+                        unique_fields=["regex"],
+                        reason="Learned lexicon pattern",
+                    )
+                    if added:
+                        updates["lexicon_updates"].append(pattern)
+                    if self.record_learning_signal(
+                        "lexicon_pattern", {"pattern": pattern, "lexicon": "obligation_phrases.yml"},
+                        reason="Queued lexicon learning signal",
+                    ):
+                        updates.setdefault("learning_signals", []).append("lexicon_pattern")
+                elif isinstance(pattern, Mapping):
+                    lexicon_name = pattern.get("lexicon") or "obligation_phrases.yml"
+                    entry = dict(pattern)
+                    entry.pop("lexicon", None)
+                    added = self.add_lexicon_entry(
+                        lexicon_name=lexicon_name,
+                        entry=entry,
+                        unique_fields=["regex", "term"],
+                        reason="Learned lexicon pattern",
+                    )
+                    if added:
+                        updates["lexicon_updates"].append(str(pattern))
+                    if self.record_learning_signal(
+                        "lexicon_pattern", {"pattern": entry, "lexicon": lexicon_name},
+                        reason="Queued lexicon learning signal",
+                    ):
+                        updates.setdefault("learning_signals", []).append("lexicon_pattern")
+
+        sentiment_overrides = signals.get("sentiment_overrides")
+        if isinstance(sentiment_overrides, list):
+            for override in sentiment_overrides:
+                if not isinstance(override, Mapping):
+                    continue
+                term = override.get("term")
+                sentiment = override.get("sentiment")
+                context = override.get("context") if isinstance(override.get("context"), str) else None
+                if isinstance(term, str):
+                    added = self.add_sentiment_override(
+                        term,
+                        sentiment,
+                        context=context,
+                        reason="Recorded sentiment override",
+                    )
+                    if added:
+                        updates["sentiment_updates"].append(term)
+                    if self.record_learning_signal(
+                        "sentiment_override",
+                        {"term": term, "sentiment": sentiment, "context": context},
+                        reason="Queued sentiment override",
+                    ):
+                        updates.setdefault("learning_signals", []).append("sentiment_override")
+
+        schema_suggestions = signals.get("schema_suggestions")
+        if isinstance(schema_suggestions, Mapping):
+            for node_type in schema_suggestions.get("node_types", []):
+                if isinstance(node_type, Mapping):
+                    added = self.add_node_type(node_type, reason="Schema evolution from learning signal")
+                    if added:
+                        updates["schema_updates"].append(node_type.get("id") or node_type.get("label", ""))
+                    if self.record_learning_signal("schema_node_type", node_type, reason="Queued schema learning signal"):
+                        updates.setdefault("learning_signals", []).append("schema_node_type")
+            for rel_type in schema_suggestions.get("relationship_types", []):
+                if isinstance(rel_type, Mapping):
+                    added = self.add_relationship_type(
+                        rel_type,
+                        reason="Schema evolution from learning signal",
+                    )
+                    if added:
+                        updates["schema_updates"].append(rel_type.get("type") or rel_type.get("rel", ""))
+                    if self.record_learning_signal("schema_relationship_type", rel_type, reason="Queued schema learning signal"):
+                        updates.setdefault("learning_signals", []).append("schema_relationship_type")
+
+        for signal_type, payload in (
+            signals.items()
+            if isinstance(signals, Mapping)
+            else []
+        ):
+            if signal_type in {"lexicon_patterns", "sentiment_overrides", "schema_suggestions"}:
+                continue
+            if isinstance(payload, Mapping) or isinstance(payload, list):
+                logged = self.record_learning_signal(signal_type, {"data": payload}, reason="Captured auxiliary signal")
+                if logged:
+                    updates.setdefault("learning_signals", []).append(signal_type)
+
+        return updates
+
     def learn_from_extraction(self, extraction: Mapping[str, Any] | None, *, source_uri: str | None = None) -> dict[str, list[str]]:
         if extraction is None:
-            return {"lexicon_updates": [], "concept_updates": [], "schema_updates": []}
+            return {
+                "lexicon_updates": [],
+                "concept_updates": [],
+                "schema_updates": [],
+                "sentiment_updates": [],
+                "learning_signals": [],
+            }
 
-        updates = {"lexicon_updates": [], "concept_updates": [], "schema_updates": []}
+        updates = {
+            "lexicon_updates": [],
+            "concept_updates": [],
+            "schema_updates": [],
+            "sentiment_updates": [],
+            "learning_signals": [],
+        }
         entities = extraction.get("entities") if isinstance(extraction, Mapping) else None
         if isinstance(entities, Mapping):
             commitments = entities.get("commitments") if isinstance(entities.get("commitments"), list) else []
@@ -354,5 +540,11 @@ class KnowledgebaseStore:
                     reason=f"Observed relationship {rel_type}",
                 ):
                     updates["schema_updates"].append(rel_type)
+
+        learning_signals = extraction.get("learning_signals") if isinstance(extraction, Mapping) else None
+        signal_updates = self.apply_learning_signals(learning_signals)
+        for key, value in signal_updates.items():
+            if isinstance(value, list):
+                updates.setdefault(key, []).extend(value)
 
         return updates
