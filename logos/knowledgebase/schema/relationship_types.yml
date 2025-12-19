@@ -1,99 +1,129 @@
-metadata:
-  version: "0.0.0"
-  updated_at: "2024-01-01T00:00:00Z"
-  updated_by: "system"
-
-relationship_types: []
 relationship_types:
-  ASSOCIATED_WITH:
-    properties: []
-    introduced_in_version: 1
-    deprecated: false
-    usage_count: 0
-    last_used: null
   ASSISTS:
+    deprecated: false
+    introduced_in_version: 1
+    last_used: null
     properties:
-      - created_by
-      - updated_by
-    introduced_in_version: 1
-    deprecated: false
+    - created_by
+    - updated_by
+    success_score: null
     usage_count: 0
+  ASSOCIATED_WITH:
+    deprecated: false
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   IDENTIFIED_IN:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
+  INFLUENCES:
+    deprecated: false
+    introduced_in_version: 1
+    last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   INSTANCE_OF:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
   INVOLVED_IN:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
   INVOLVES:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   MADE:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
   MENTIONS:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
+  PARTICIPATED_IN:
+    deprecated: false
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   PARTY_TO:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
   RAISED_IN:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   RELATED_TO:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   RELATES_TO:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
-  RESULT_OF:
-    properties: []
     introduced_in_version: 1
-    deprecated: false
-    usage_count: 0
-    last_used: null
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1
   RESULTS_IN:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
+    introduced_in_version: 1
     last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
+  RESULT_OF:
+    deprecated: false
+    introduced_in_version: 1
+    last_used: null
+    properties: []
+    success_score: null
+    usage_count: 0
   WORKS_FOR:
-    properties: []
-    introduced_in_version: 1
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - source_uri
+    success_score: null
+    usage_count: 1

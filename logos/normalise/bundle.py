@@ -8,6 +8,10 @@ import yaml
 
 from logos.graphio.upsert import GraphNode, GraphRelationship, InteractionBundle
 
+RELATIONSHIP_TYPES_PATH = (
+    Path(__file__).resolve().parent.parent / "knowledgebase" / "schema" / "relationship_types.yml"
+)
+
 
 def _normalise_entity_list(
     entries: Iterable[Any],
@@ -43,16 +47,67 @@ def _parse_datetime(value: str | datetime | None) -> datetime | None:
 _REASONING_REL_TYPES = {"RESULT_OF", "RELATED_TO", "INFLUENCES"}
 
 
-def _build_reasoning_relationships(entries: Iterable[Mapping[str, Any]]) -> list[GraphRelationship]:
+def _normalise_rel_key(rel: str) -> str:
+    return rel.replace("-", "_").replace(" ", "_").upper()
+
+
+def _load_relationship_mappings(path: Path = RELATIONSHIP_TYPES_PATH) -> dict[str, str]:
+    if not path.exists():
+        return {}
+
+    with path.open("r", encoding="utf-8") as file:
+        data = yaml.safe_load(file) or {}
+
+    entries = data.get("relationship_types") if isinstance(data.get("relationship_types"), Mapping) else data
+    mapping: dict[str, str] = {}
+    if not isinstance(entries, Mapping):
+        return mapping
+
+    for rel_type, definition in entries.items():
+        if not rel_type:
+            continue
+        canonical = _normalise_rel_key(str(rel_type))
+        mapping[_normalise_rel_key(str(rel_type))] = canonical
+        if isinstance(definition, Mapping):
+            aliases = definition.get("aliases") if isinstance(definition.get("aliases"), (list, tuple, set)) else []
+            for alias in aliases:
+                if alias:
+                    mapping[_normalise_rel_key(str(alias))] = canonical
+    return mapping
+
+
+_REL_TYPE_MAP = _load_relationship_mappings()
+
+
+def _refresh_relationship_mappings(path: Path | None = None) -> dict[str, str]:
+    global _REL_TYPE_MAP
+    _REL_TYPE_MAP = _load_relationship_mappings(path or RELATIONSHIP_TYPES_PATH)
+    return _REL_TYPE_MAP
+
+
+def _canonical_rel_type(rel: str | None, mapping: Mapping[str, str] | None = None) -> str | None:
+    if not rel:
+        return None
+    rel_map = mapping or _REL_TYPE_MAP
+    normalised = _normalise_rel_key(str(rel))
+    return rel_map.get(normalised, normalised)
+
+
+def _build_reasoning_relationships(
+    entries: Iterable[Mapping[str, Any]],
+    rel_map: Mapping[str, str] | None = None,
+) -> list[GraphRelationship]:
     """Convert extracted reasoning entries into GraphRelationship instances."""
 
     relationships: list[GraphRelationship] = []
+    mapping = rel_map or _REL_TYPE_MAP
+    allowed = set(mapping.values()) if mapping else _REASONING_REL_TYPES
     for entry in entries:
         if not isinstance(entry, Mapping):
             continue
 
-        rel = (entry.get("relation") or entry.get("rel") or "").upper()
-        if rel not in _REASONING_REL_TYPES:
+        rel = _canonical_rel_type(entry.get("relation") or entry.get("rel"), mapping)
+        if not rel or (allowed and rel not in allowed):
             continue
 
         src = entry.get("source") or entry.get("src") or entry.get("from")
@@ -75,7 +130,7 @@ def _build_reasoning_relationships(entries: Iterable[Mapping[str, Any]]) -> list
                 rel=rel,
                 src_label=entry.get("source_label") or entry.get("src_label"),
                 dst_label=entry.get("target_label") or entry.get("dst_label"),
-                properties=props or None,
+                properties=props,
             )
         )
 
@@ -211,8 +266,9 @@ def _derive_relationships_from_properties(
             allowed_sources = rule.get("source_labels")
             if allowed_sources and node.label not in allowed_sources:
                 continue
-            rel_type = rule.get("rel") or rule.get("type")
+            rel_type_raw = rule.get("rel") or rule.get("type")
             target_label = rule.get("target_label")
+            rel_type = _canonical_rel_type(rel_type_raw)
             if not rel_type or not target_label:
                 continue
             raw_value = node.properties.get(prop_key)
@@ -231,6 +287,24 @@ def _derive_relationships_from_properties(
                     )
                 )
     return relationships
+
+
+def _normalise_relationship_entries(
+    relationships: Iterable[Mapping[str, Any]],
+    rel_map: Mapping[str, str] | None = None,
+) -> list[Mapping[str, Any]]:
+    mapping = rel_map or _REL_TYPE_MAP
+    normalised: list[Mapping[str, Any]] = []
+    for rel in relationships:
+        if not isinstance(rel, Mapping):
+            continue
+        canonical_rel = _canonical_rel_type(rel.get("rel") or rel.get("type"), mapping)
+        if not canonical_rel:
+            continue
+        updated = dict(rel)
+        updated["rel"] = canonical_rel
+        normalised.append(updated)
+    return normalised
 
 
 def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> InteractionBundle:
@@ -254,10 +328,13 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
     nodes, inferred_relationships = _build_nodes_from_entities(entities_raw, interaction.source_uri, inference_rules)
 
     relationships_raw = preview.get("relationships", []) if isinstance(preview, dict) else []
-    reasoning_relationships = _build_reasoning_relationships(preview.get("reasoning", []) if isinstance(preview, dict) else [])
+    normalised_relationships = _normalise_relationship_entries(relationships_raw)
+    reasoning_relationships = _build_reasoning_relationships(
+        preview.get("reasoning", []) if isinstance(preview, dict) else [], _REL_TYPE_MAP
+    )
     relationships = [
         GraphRelationship.model_validate(rel)
-        for rel in relationships_raw
+        for rel in normalised_relationships
         if isinstance(rel, dict) and rel.get("src") and rel.get("dst") and rel.get("rel")
     ] + inferred_relationships + reasoning_relationships
 
