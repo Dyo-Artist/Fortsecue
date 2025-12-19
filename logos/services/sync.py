@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
@@ -35,6 +36,17 @@ class GraphUpdateEvent(BaseModel):
     summary: Dict[str, int] = Field(default_factory=dict)
 
 
+def _collection_key(label: str) -> str:
+    """Convert a node label into a collection-style key (snake_case plural)."""
+
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", label).lower()
+    if snake.endswith("y") and not snake.endswith("ay"):
+        return f"{snake[:-1]}ies"
+    if snake.endswith("s"):
+        return snake
+    return f"{snake}s"
+
+
 def build_graph_update_event(
     bundle: InteractionBundle, committed_at: datetime | None = None
 ) -> GraphUpdateEvent:
@@ -43,24 +55,20 @@ def build_graph_update_event(
     committed = _ensure_utc(committed_at or datetime.now(timezone.utc))
     interaction_data = bundle.interaction.model_dump(mode="json")
 
-    entities = {
-        "stakeholder_types": [item.model_dump(mode="json") for item in bundle.entities.stakeholder_types],
-        "risk_categories": [item.model_dump(mode="json") for item in bundle.entities.risk_categories],
-        "topic_groups": [item.model_dump(mode="json") for item in bundle.entities.topic_groups],
-        "orgs": [item.model_dump(mode="json") for item in bundle.entities.orgs],
-        "persons": [item.model_dump(mode="json") for item in bundle.entities.persons],
-        "projects": [item.model_dump(mode="json") for item in bundle.entities.projects],
-        "contracts": [item.model_dump(mode="json") for item in bundle.entities.contracts],
-        "topics": [item.model_dump(mode="json") for item in bundle.entities.topics],
-        "commitments": [item.model_dump(mode="json") for item in bundle.entities.commitments],
-        "issues": [item.model_dump(mode="json") for item in bundle.entities.issues],
-        "risks": [item.model_dump(mode="json") for item in bundle.entities.risks],
-        "outcomes": [item.model_dump(mode="json") for item in bundle.entities.outcomes],
-    }
-    relationships = [item.model_dump(mode="json") for item in bundle.relationships]
+    entities: Dict[str, List[Dict[str, Any]]] = {}
+    for node in bundle.nodes:
+        key = _collection_key(node.label)
+        entities.setdefault(key, []).append(node.model_dump(mode="json"))
+
+    relationships = [
+        item.model_dump(mode="json")
+        for item in bundle.relationships
+        if item.rel_type != "INSTANCE_OF"
+    ]
 
     summary = {key: len(items) for key, items in entities.items()}
-    summary["relationships"] = len(relationships)
+    preview_relationships = [rel for rel in relationships if rel.get("source_uri") is None]
+    summary["relationships"] = len(preview_relationships)
 
     return GraphUpdateEvent(
         interaction_id=bundle.interaction.id,
