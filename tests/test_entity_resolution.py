@@ -59,6 +59,7 @@ def test_resolve_preview_updates_entities_and_relationships():
     org = resolved["entities"]["orgs"][0]
     assert org["id"] == "o_acme"
     assert org["canonical_id"] == "o_acme"
+    assert org.get("is_new") is False
     assert org["temp_id"] == "org_temp"
     assert org["resolution_status"] == "resolved"
     assert org["identity_candidates"][0]["id"] == "o_acme"
@@ -67,12 +68,14 @@ def test_resolve_preview_updates_entities_and_relationships():
     assert person["id"] == "p_alice"
     assert person["org_id"] == "o_acme"
     assert person["canonical_id"] == "p_alice"
+    assert person.get("is_new") is False
     assert person["alternates"] == []
     assert person["resolution_status"] == "resolved"
 
     project = resolved["entities"]["projects"][0]
     assert project["id"] == "pr_apollo"
     assert project["canonical_id"] == "pr_apollo"
+    assert project.get("is_new") is False
 
     assert resolved.get("resolution_log", []) == []
 
@@ -95,9 +98,10 @@ def test_low_confidence_person_does_not_resolve():
     assert person.get("canonical_id") is None
     assert person["id"] == "p_temp"
     assert person.get("best_guess_id") == "p_existing"
-    assert person.get("resolution_status") == "ambiguous"
-    assert person.get("confidence_level") == "medium"
+    assert person.get("resolution_status") == "new"
+    assert person.get("is_new") is True
     assert person.get("needs_review") is True
+    assert any(reason.startswith("confidence_below") for reason in person.get("review_reasons", []))
     assert resolved.get("resolution_log")
 
 

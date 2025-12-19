@@ -478,6 +478,43 @@ class GraphEntityResolver:
         evaluated.sort(key=lambda result: result.get("score", 0.0), reverse=True)
         return evaluated
 
+    def _decide_identity(
+        self,
+        category: str,
+        evaluated: list[Dict[str, Any]],
+        min_confidence: float,
+    ) -> Dict[str, Any]:
+        candidate_floor = self._candidate_floor(category)
+        ambiguity_gap = self._ambiguity_gap(category)
+
+        candidates_above_floor = [candidate for candidate in evaluated if candidate.get("score", 0.0) >= candidate_floor]
+        best = candidates_above_floor[0] if candidates_above_floor else None
+        best_guess_id = str(best.get("id")) if best and best.get("id") is not None else None
+        confidence = float(best.get("score", 0.0)) if best else 0.0
+
+        canonical_id: str | None = None
+        status = "new"
+        below_threshold = bool(best_guess_id) and confidence < min_confidence
+
+        if best_guess_id and confidence >= min_confidence:
+            canonical_id = best_guess_id
+            status = "resolved"
+            if len(candidates_above_floor) > 1:
+                second = candidates_above_floor[1]
+                if confidence - float(second.get("score", 0.0)) <= ambiguity_gap:
+                    status = "multi_resolved"
+        elif candidates_above_floor:
+            status = "new"
+
+        return {
+            "canonical_id": canonical_id,
+            "status": status,
+            "best_guess_id": best_guess_id,
+            "confidence": confidence,
+            "candidates_above_floor": candidates_above_floor,
+            "below_threshold": below_threshold,
+        }
+
     def _build_resolution(
         self,
         category: str,
@@ -489,31 +526,15 @@ class GraphEntityResolver:
         existing_id = updated.get("id")
         updated["temp_id"] = existing_id
 
-        candidate_floor = self._candidate_floor(category)
         max_alternates = self._max_alternates(category)
-        ambiguity_gap = self._ambiguity_gap(category)
 
-        candidates_above_floor = [candidate for candidate in evaluated if candidate.get("score", 0.0) >= candidate_floor]
-        best = candidates_above_floor[0] if candidates_above_floor else None
-        best_guess_id = best.get("id") if best else None
-        confidence = float(best.get("score", 0.0)) if best else 0.0
+        decision = self._decide_identity(category, evaluated, min_confidence)
+        candidates_above_floor = decision["candidates_above_floor"]
+        canonical_id = decision["canonical_id"]
+        status = decision["status"]
+        best_guess_id = decision["best_guess_id"]
+        confidence = decision["confidence"]
         confidence_level = self._confidence_level(category, confidence)
-
-        canonical_id: str | None = None
-        status = "unresolved"
-        if best and best_guess_id:
-            if confidence >= min_confidence:
-                canonical_id = str(best_guess_id)
-                status = "resolved"
-            elif len(candidates_above_floor) > 1:
-                status = "ambiguous"
-            else:
-                status = "ambiguous"
-
-        if canonical_id and len(candidates_above_floor) > 1:
-            second = candidates_above_floor[1]
-            if confidence - float(second.get("score", 0.0)) <= ambiguity_gap:
-                status = "multi_resolved"
 
         candidate_view = [
             {
@@ -526,13 +547,19 @@ class GraphEntityResolver:
         ]
 
         needs_review, review_reasons = self._needs_review(category, status, confidence_level)
+        if decision.get("below_threshold"):
+            needs_review = True
+            review_reasons = (review_reasons or []) + [f"confidence_below:{min_confidence}"]
+
         updated["canonical_id"] = canonical_id
         updated["confidence"] = confidence
         updated["confidence_level"] = confidence_level
         updated["best_guess_id"] = best_guess_id
+        updated["is_new"] = canonical_id is None
         if canonical_id:
             updated["id"] = canonical_id
-            candidate_org = best.get("candidate", {}) if best else {}
+            best_candidate = candidates_above_floor[0] if candidates_above_floor else None
+            candidate_org = best_candidate.get("candidate", {}) if best_candidate else {}
             if candidate_org.get("org_id") and updated.get("org_id"):
                 updated["org_id"] = candidate_org.get("org_id")
         updated["identity_candidates"] = candidate_view
