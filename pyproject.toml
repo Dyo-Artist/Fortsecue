@@ -1,6 +1,5 @@
-# pyproject.toml (to be placed in the repository root)
 [build-system]
-requires = ["setuptools >= 77.0.3"]
+requires = ["setuptools >= 77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -28,21 +27,19 @@ dependencies = [
   "python-dateutil",
   "tenacity",
   "typing-extensions",
-  "orjson",
+  "orjson"
 ]
-
 
 [project.optional-dependencies]
 dev = [
   "pytest",
-  "ruff",
   "pytest-asyncio",
   "pytest-mock",
+  "ruff"
 ]
 
 nlp = [
   "spacy",
   "transformers",
-  "scikit-learn",
+  "scikit-learn"
 ]
-
