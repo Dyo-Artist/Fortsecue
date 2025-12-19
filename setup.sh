@@ -22,8 +22,10 @@ else
   mkdir -p .cache
   rm -f .cache/deps.*.stamp
   if command -v uv >/dev/null 2>&1; then
-    uv pip install -e .  # editable install via pyproject.toml
+    uv pip install --system -U pip wheel
+    uv pip install --system -e .  # editable install via pyproject.toml
   else
+    pip install -U pip wheel
     pip install -e .
   fi
   touch "$STAMP"
