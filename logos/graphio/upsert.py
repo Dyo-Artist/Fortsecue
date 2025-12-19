@@ -141,6 +141,8 @@ def upsert_node(tx, node: GraphNode, now: datetime, *, schema_store: SchemaStore
     label = _ensure_valid_label(node.label)
     props = _clean_properties(node.properties)
     schema_props = set(props.keys()) | {"source_uri"}
+    if not node.source_uri:
+        raise ValueError(f"GraphNode {node.id} is missing a source_uri for provenance")
     schema_store.record_node_type(label, schema_props, concept_kind=node.concept_kind, now=now)
 
     cypher = (
@@ -178,6 +180,8 @@ def upsert_relationship(
     schema_store: SchemaStore = SCHEMA_STORE,
 ) -> None:
     rel_type = _ensure_valid_rel_type(rel.rel_type)
+    if not source_uri:
+        raise ValueError(f"Relationship {rel.src}->{rel.rel_type}->{rel.dst} is missing a source_uri for provenance")
     props = _clean_properties(rel.properties)
     schema_store.record_relationship_type(rel_type, set(props.keys()) | {"source_uri"}, now=now)
 
@@ -208,7 +212,8 @@ def upsert_interaction_bundle(
     *,
     schema_store: SchemaStore = SCHEMA_STORE,
 ) -> None:
-    source_uri = bundle.interaction.source_uri
+    source_uri = bundle.interaction.source_uri or f"interaction://{bundle.interaction.id}"
+    bundle.interaction.source_uri = source_uri
     for node in bundle.all_nodes:
         node.source_uri = node.source_uri or source_uri
         upsert_node(tx, node, now, schema_store=schema_store)
