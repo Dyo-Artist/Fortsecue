@@ -78,6 +78,36 @@ def test_upsert_relationship_accepts_dynamic_type(tmp_path):
     assert rel_types["COLLABORATES_WITH"]["usage_count"] == 1
 
 
+def test_upsert_node_merges_by_id_only(tmp_path):
+    tx = FakeTx()
+    now = datetime(2024, 2, 1, tzinfo=timezone.utc)
+    store = _temp_schema(tmp_path)
+    node = GraphNode(id="person-1", label="Person", properties={"name": "Ada", "title": "Engineer"})
+
+    upsert_node(tx, node, now, schema_store=store)
+
+    cypher, params = tx.calls[0]
+    assert "MERGE (n:Person {id: $id})" in cypher
+    assert params["id"] == "person-1"
+    assert "MERGE (n:Person {name" not in cypher
+
+
+def test_upsert_relationship_matches_nodes_by_id(tmp_path):
+    tx = FakeTx()
+    now = datetime(2024, 2, 1, tzinfo=timezone.utc)
+    store = _temp_schema(tmp_path)
+    rel = GraphRelationship(src="src-123", dst="dst-456", rel="MENTIONS", src_label="Interaction", dst_label="Topic")
+
+    upsert_relationship(tx, rel, "source://mention", now, schema_store=store)
+
+    cypher, params = tx.calls[0]
+    assert "MATCH (src:Interaction {id: $src})" in cypher
+    assert "MATCH (dst:Topic {id: $dst})" in cypher
+    assert "MERGE (src)-[r:MENTIONS]->(dst)" in cypher
+    assert params["src"] == "src-123"
+    assert params["dst"] == "dst-456"
+
+
 def test_upsert_interaction_bundle_handles_dynamic_nodes(tmp_path):
     tx = FakeTx()
     now = datetime(2024, 3, 1, tzinfo=timezone.utc)
