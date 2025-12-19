@@ -39,6 +39,19 @@ def _get_memory_manager(context: Dict[str, Any]) -> MemoryManager:
     return manager
 
 
+def _merge_updates(target: Dict[str, list[str]], incoming: Mapping[str, Any] | None) -> Dict[str, list[str]]:
+    """Combine learning update dictionaries while preserving list semantics."""
+
+    if not isinstance(incoming, Mapping):
+        return target
+
+    for key, value in incoming.items():
+        if isinstance(value, list):
+            target.setdefault(key, []).extend(value)
+
+    return target
+
+
 def require_raw_input(bundle: PipelineBundle | Dict[str, Any], context: Dict[str, Any] | None = None) -> RawInputBundle:
     """Ensure the pipeline starts with a RawInputBundle."""
 
@@ -149,21 +162,46 @@ def sync_knowledgebase(bundle: ExtractionBundle, context: Dict[str, Any] | None 
         actor = context.get("actor") or context.get("user") or "system"
         updater = KnowledgebaseStore(base_path=base_path, actor=str(actor))
 
-    updates: dict[str, list[str]] = {"lexicon_updates": [], "concept_updates": [], "schema_updates": []}
+    updates: dict[str, list[str]] = {
+        "lexicon_updates": [],
+        "concept_updates": [],
+        "schema_updates": [],
+        "sentiment_updates": [],
+        "learning_signals": [],
+    }
     try:
         updates = updater.learn_from_extraction(bundle.extraction, source_uri=bundle.source_uri)
 
         schema_updates = context.get("schema_updates") if isinstance(context.get("schema_updates"), dict) else {}
-        for node_type in schema_updates.get("node_types", []):
-            if isinstance(node_type, dict):
-                added = updater.add_node_type(node_type, reason="Schema evolution from pipeline")
-                if added:
-                    updates.setdefault("schema_updates", []).append(node_type.get("id") or node_type.get("label", ""))
-        for rel_type in schema_updates.get("relationship_types", []):
-            if isinstance(rel_type, dict):
-                added = updater.add_relationship_type(rel_type, reason="Schema evolution from pipeline")
-                if added:
-                    updates.setdefault("schema_updates", []).append(rel_type.get("type") or rel_type.get("rel", ""))
+
+        learning_signals: dict[str, Any] = {}
+        if schema_updates:
+            learning_signals["schema_suggestions"] = schema_updates
+
+        for source in (getattr(bundle, "metadata", None), context):
+            if isinstance(source, Mapping):
+                raw_signals = source.get("learning_signals")
+                if isinstance(raw_signals, Mapping):
+                    for key, value in raw_signals.items():
+                        if isinstance(value, list) or isinstance(value, Mapping):
+                            existing = learning_signals.get(key)
+                            if isinstance(existing, list) and isinstance(value, list):
+                                learning_signals[key] = existing + value
+                            elif isinstance(existing, Mapping) and isinstance(value, Mapping):
+                                merged = dict(existing)
+                                for sig_key, sig_value in value.items():
+                                    if sig_key in merged and isinstance(merged[sig_key], list) and isinstance(sig_value, list):
+                                        merged[sig_key] = merged[sig_key] + sig_value
+                                    else:
+                                        merged[sig_key] = sig_value
+                                learning_signals[key] = merged
+                            else:
+                                learning_signals[key] = value
+                        else:
+                            learning_signals[key] = value
+
+        signal_updates = updater.apply_learning_signals(learning_signals)
+        updates = _merge_updates(updates, signal_updates)
     except KnowledgebaseWriteError as exc:
         LOGGER.warning("Knowledgebase sync failed: %s", exc)
 
