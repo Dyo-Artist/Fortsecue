@@ -21,21 +21,11 @@ else
   echo "📦 Installing dependencies (hash $HASH)"
   mkdir -p .cache
   rm -f .cache/deps.*.stamp
-  if command -v uv >/dev/null 2>&1; then
-    uv pip install --system -U pip wheel
-    uv pip install --system -e .  # editable install via pyproject.toml
-  else
-    pip install -U pip wheel
-    pip install -e .
-  fi
+  pip install -U pip wheel
+  pip install -r requirements.txt
   touch "$STAMP"
 fi
 
-# Run linters/tests in a non-fatal way so cloud environments can start
-if command -v ruff >/dev/null 2>&1; then
-  ruff check . || echo "⚠️ ruff failed (non-fatal in this environment)"
-fi
-
-if command -v pytest >/dev/null 2>&1; then
-  pytest -q || echo "⚠️ pytest failed (non-fatal in this environment)"
-fi
+# Run linters/tests after installation
+ruff check .
+pytest -q
