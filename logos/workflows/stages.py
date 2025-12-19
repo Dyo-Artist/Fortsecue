@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 from uuid import uuid4
 
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
-from logos.memory import MemoryManager
+from logos.memory import MemoryItem, MemoryManager
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
@@ -229,6 +229,21 @@ def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | No
                 importance=importance,
             )
 
+    manager = _get_memory_manager(context)
+    manager.record_short_term(
+        str(interaction_id),
+        "preview_bundle",
+        {
+            "interaction": preview["interaction"],
+            "entities": preview["entities"],
+            "relationships": preview["relationships"],
+        },
+        importance=float(context.get("preview_importance", 0.5)),
+        tags=("preview", type_),
+        metadata={"source_uri": source_uri},
+    )
+    manager.update_session_summary(str(interaction_id), preview)
+
     persist_fn = context.get("persist_preview")
     if callable(persist_fn):
         return persist_fn(interaction_id, metadata, extraction_data)
@@ -247,6 +262,37 @@ def require_preview_payload(bundle: Dict[str, Any] | Any, context: Dict[str, Any
         return bundle
 
     raise TypeError("Commit pipeline expects a preview mapping")
+
+
+def capture_preview_memory(bundle: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Project the preview payload into short- and mid-term memory for the session."""
+
+    if context is None:
+        context = {}
+    _trace(context, "capture_preview_memory")
+
+    if not isinstance(bundle, dict):
+        raise TypeError("capture_preview_memory expects a preview mapping")
+
+    session_id = str(context.get("interaction_id") or bundle.get("interaction", {}).get("id") or uuid4().hex)
+    context.setdefault("interaction_id", session_id)
+    manager = _get_memory_manager(context)
+
+    preview_snapshot = {
+        "interaction": bundle.get("interaction", {}),
+        "entities": bundle.get("entities", {}),
+        "relationships": bundle.get("relationships", []),
+    }
+    manager.record_short_term(
+        session_id,
+        "preview_bundle",
+        preview_snapshot,
+        importance=float(context.get("preview_importance", 0.5)),
+        tags=("preview", preview_snapshot.get("interaction", {}).get("type", "")),
+        metadata={"source_uri": preview_snapshot.get("interaction", {}).get("source_uri")},
+    )
+    manager.update_session_summary(session_id, bundle)
+    return bundle
 
 
 def resolve_entities_from_graph(bundle: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -320,6 +366,34 @@ def upsert_interaction_bundle_stage(
         "interaction_id": bundle.interaction.id,
         "counts": _summarise_counts(bundle),
     }
+
+
+def persist_session_memory(bundle: Dict[str, Any], context: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Persist mid-term session context into the knowledgebase as long-term memory."""
+
+    if context is None:
+        context = {}
+    _trace(context, "persist_session_memory")
+
+    manager = _get_memory_manager(context)
+    session_id = str(context.get("interaction_id") or bundle.get("interaction_id") or "")
+    kb_store = context.get("knowledge_updater")
+    if not isinstance(kb_store, KnowledgebaseStore):
+        kb_store = KnowledgebaseStore(
+            base_path=context.get("knowledgebase_path"), actor=str(context.get("actor") or context.get("user") or "system")
+        )
+
+    def _persist(item: MemoryItem, payload: Dict[str, Any]) -> None:
+        history = payload.get("metadata", {}).get("history", []) if isinstance(payload.get("metadata"), Mapping) else []
+        kb_store.record_session_memory(
+            session_id or payload.get("key", "session"),
+            payload.get("content", ""),
+            interactions=history if isinstance(history, list) else [],
+            reason=f"Persisted session summary for {session_id or 'interaction'}",
+        )
+
+    manager.consolidate(session_id=session_id, persist_fn=_persist)
+    return bundle
 
 
 def ensure_memory_manager(bundle: Any, context: Dict[str, Any] | None = None) -> MemoryManager:

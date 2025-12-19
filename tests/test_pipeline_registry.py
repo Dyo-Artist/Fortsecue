@@ -20,9 +20,11 @@ def test_load_pipeline_config_reads_yaml_registry():
     ]
     assert pipelines["commit_interaction"] == [
         "logos.workflows.stages.require_preview_payload",
+        "logos.workflows.stages.capture_preview_memory",
         "logos.workflows.stages.resolve_entities_from_graph",
         "logos.workflows.stages.build_interaction_bundle_stage",
         "logos.workflows.stages.upsert_interaction_bundle_stage",
+        "logos.workflows.stages.persist_session_memory",
     ]
     assert pipelines["memory_consolidation"] == [
         "logos.workflows.stages.ensure_memory_manager",

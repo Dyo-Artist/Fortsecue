@@ -252,6 +252,26 @@ class KnowledgebaseStore:
             reason=reason or "Registered new relationship type",
         )
 
+    def record_session_memory(
+        self,
+        session_id: str,
+        summary: str,
+        *,
+        interactions: Iterable[Mapping[str, Any]] | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        entry: dict[str, Any] = {"session_id": session_id, "summary": summary}
+        if interactions is not None:
+            entry["interactions"] = list(interactions)
+
+        return self._append_entry(
+            file_path=self.base_path / "workflows" / "session_memory.yml",
+            list_key="sessions",
+            entry=entry,
+            unique_fields=["session_id", "summary"],
+            reason=reason or "Recorded session memory snapshot",
+        )
+
     def update_prompt_template(self, prompt_name: str, template: str, *, reason: str | None = None) -> str:
         path = self.base_path / "prompts" / prompt_name
         with self._file_lock(path):

@@ -107,6 +107,7 @@ def _normalise_rules(rules: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
             "promotion_strength_threshold": _coerce_float(mid_term.get("promotion_strength_threshold", float("inf")), float("inf")),
             "importance_promotion_threshold": _coerce_float(mid_term.get("importance_promotion_threshold", 1.0), 1.0),
             "pinned_ttl_seconds": _coerce_int(mid_term.get("pinned_ttl_seconds")),
+            "session_history_size": _coerce_int(mid_term.get("session_history_size"), 5) or 5,
         },
         "long_term": {
             "summary_max_chars": _coerce_int(long_term.get("summary_max_chars")),
@@ -141,6 +142,60 @@ class MemoryManager:
 
     def get_mid_term_items(self) -> List[MemoryItem]:
         return list(self._mid_term.values())
+
+    def _session_summary_key(self, session_id: str) -> str:
+        return f"session:{session_id}:summary"
+
+    def _recent_history(self, session_id: str, *, new_entry: Mapping[str, Any]) -> List[Dict[str, Any]]:
+        history: List[Dict[str, Any]] = []
+        for item in self._mid_term.values():
+            if item.key == self._session_summary_key(session_id):
+                history = list(item.metadata.get("history", [])) if isinstance(item.metadata, Mapping) else []
+                break
+
+        max_size = self._rules["mid_term"].get("session_history_size", 5) or 5
+        history.append(dict(new_entry))
+        return history[-max_size:]
+
+    def update_session_summary(self, session_id: str, preview: Mapping[str, Any]) -> MemoryItem:
+        """Maintain a mid-term running summary for a session from preview payloads."""
+
+        interaction = preview.get("interaction") if isinstance(preview, Mapping) else {}
+        summary_text = None
+        if isinstance(interaction, Mapping):
+            summary_text = interaction.get("summary") or interaction.get("id")
+
+        entities = preview.get("entities") if isinstance(preview, Mapping) else {}
+        relationships = preview.get("relationships") if isinstance(preview, Mapping) else []
+        entry = {
+            "interaction_id": interaction.get("id") if isinstance(interaction, Mapping) else None,
+            "summary": summary_text,
+            "entities": entities,
+            "relationships": relationships,
+        }
+
+        history = self._recent_history(session_id, new_entry=entry)
+        combined_summary_parts = [item.get("summary") for item in history if isinstance(item, Mapping)]
+        combined_summary = "; ".join([part for part in combined_summary_parts if isinstance(part, str) and part])
+        summary_key = self._session_summary_key(session_id)
+
+        existing = next((item for item in self._mid_term.values() if item.key == summary_key), None)
+        if existing:
+            existing.content = combined_summary
+            existing.last_used = self._now()
+            existing.metadata["history"] = history
+            existing.pinned = True
+            existing.importance = max(existing.importance, 1.0)
+            return existing
+
+        return self.store_mid_term(
+            summary_key,
+            combined_summary,
+            importance=1.0,
+            pinned=True,
+            tags=("session_summary",),
+            metadata={"history": history},
+        )
 
     def record_short_term(
         self,

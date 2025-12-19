@@ -1,9 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import yaml
 
 from logos.memory import MemoryManager, load_memory_rules
 from logos.workflows import run_pipeline
 from logos.workflows.bundles import ExtractionBundle
-from logos.workflows.stages import build_preview_payload
+from logos.workflows.stages import build_preview_payload, capture_preview_memory, persist_session_memory
 
 
 def test_memory_rules_are_loaded_from_knowledgebase():
@@ -58,6 +61,7 @@ def test_build_preview_records_reasoning_in_short_term_memory():
     assert isinstance(manager, MemoryManager)
     items = manager.get_short_term_items("mem-1")
     assert any(item.key == "reasoning_trace" for item in items)
+    assert any(item.key == "preview_bundle" for item in items)
 
 
 def test_memory_consolidation_pipeline_runs():
@@ -75,3 +79,25 @@ def test_memory_consolidation_pipeline_runs():
 
     assert mid_item.id in result["persisted"]
     assert persisted and persisted[0]["key"] == "justification"
+
+
+def test_session_memory_persists_to_knowledgebase(tmp_path: Path):
+    preview = {
+        "interaction": {"id": "sess-ctx", "summary": "sample", "type": "note"},
+        "entities": {"concepts": ["alpha"]},
+        "relationships": [],
+    }
+    context: dict[str, object] = {"interaction_id": "sess-ctx", "knowledgebase_path": tmp_path}
+
+    capture_preview_memory(preview, context)
+    persist_session_memory({"interaction_id": "sess-ctx"}, context)
+
+    manager = context.get("memory_manager")
+    assert isinstance(manager, MemoryManager)
+    summaries = [item for item in manager.get_mid_term_items() if "session:sess-ctx" in item.key]
+    assert summaries
+
+    kb_file = tmp_path / "workflows" / "session_memory.yml"
+    assert kb_file.exists()
+    data = yaml.safe_load(kb_file.read_text())
+    assert data["sessions"]
