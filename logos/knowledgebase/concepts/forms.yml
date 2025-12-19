@@ -1,0 +1,60 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+forms:
+  - id: form_stakeholder
+    name: "Stakeholder"
+    description: "Any person or organisation with interest or influence."
+    node_labels: ["Person", "Org"]
+
+  - id: form_person
+    name: "Person"
+    description: "Individual stakeholder with a role or title."
+    node_labels: ["Person"]
+
+  - id: form_organisation
+    name: "Organisation"
+    description: "Company, agency, or group participating in the engagement."
+    node_labels: ["Org"]
+
+  - id: form_project
+    name: "Project"
+    description: "Project or program that anchors workstreams and interactions."
+    node_labels: ["Project"]
+
+  - id: form_interaction
+    name: "Interaction"
+    description: "Observed interaction or communication."
+    node_labels: ["Interaction"]
+
+  - id: form_commitment
+    name: "Commitment"
+    description: "Engagement action or obligation arising from interactions."
+    node_labels: ["Commitment"]
+
+  - id: form_issue
+    name: "Issue"
+    description: "Concern or problem raised by stakeholders."
+    node_labels: ["Issue"]
+
+  - id: form_risk
+    name: "Risk"
+    description: "Anticipated problem that could affect outcomes."
+    node_labels: ["Risk"]
+
+  - id: form_outcome
+    name: "Outcome"
+    description: "Resulting change, benefit, or impact."
+    node_labels: ["Outcome"]
+
+  - id: form_topic
+    name: "Topic"
+    description: "Tag or taxonomy item used for categorisation."
+    node_labels: ["Topic"]
+
+  - id: form_agent
+    name: "Agent"
+    description: "Software or workflow agent contributing actions or decisions."
+    node_labels: ["Agent"]

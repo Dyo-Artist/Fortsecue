@@ -1,6 +1,22 @@
 metadata:
-  version: "0.0.0"
+  version: "0.1.0"
   updated_at: "2024-01-01T00:00:00Z"
   updated_by: "system"
 
-risk_categories: []
+risk_categories:
+  - id: rc_schedule
+    name: "Schedule"
+    description: "Schedule and timeline risks."
+    form_id: form_risk
+  - id: rc_commercial
+    name: "Commercial"
+    description: "Commercial or contractual exposure."
+    form_id: form_risk
+  - id: rc_reputation
+    name: "Reputation"
+    description: "Reputation and stakeholder trust impacts."
+    form_id: form_risk
+  - id: rc_esg
+    name: "ESG"
+    description: "Environmental, social, or governance risks."
+    form_id: form_risk

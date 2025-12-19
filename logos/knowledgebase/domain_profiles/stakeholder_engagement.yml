@@ -1,0 +1,56 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+id: stakeholder_engagement
+name: "Stakeholder Engagement"
+description: "Stakeholder mapping, interactions, commitments, issues, risks, and outcomes."
+
+forms:
+  enabled:
+    - Stakeholder
+    - Organisation
+    - Person
+    - Project
+    - Interaction
+    - Commitment
+    - Issue
+    - Risk
+    - Outcome
+    - Topic
+    - Agent
+
+concept_sets:
+  - stakeholder_types
+  - risk_categories
+  - issue_categories
+  - outcome_types
+
+concept_files:
+  stakeholder_types: "../concepts/stakeholder_types.yml"
+  risk_categories: "../concepts/risk_categories.yml"
+  issue_categories: "../concepts/issue_categories.yml"
+  outcome_types: "../concepts/outcome_types.yml"
+  forms: "../concepts/forms.yml"
+
+topics:
+  file: "../topics/topics.yml"
+
+lexicons:
+  obligation_phrases: "../lexicons/obligation_phrases.yml"
+
+prompts:
+  extraction_interaction: "../prompts/extraction_interaction.yml"
+
+rules:
+  memory: "../rules/memory.yml"
+  entity_resolution: "../rules/entity_resolution.yml"
+  merge_thresholds: "../rules/merge_thresholds.yml"
+
+models:
+  tiers: "../models/tiers.yml"
+  catalog: "../models/catalog.yml"
+
+pipelines:
+  definition: "../workflows/pipelines.yml"

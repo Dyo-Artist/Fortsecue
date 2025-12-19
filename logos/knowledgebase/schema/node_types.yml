@@ -1,165 +1,195 @@
 metadata:
-  version: "0.0.0"
-  updated_at: "2024-01-01T00:00:00Z"
-  updated_by: "system"
-
-node_types: []
+  version: 0.1.0
+  updated_at: '2024-01-01T00:00:00Z'
+  updated_by: system
 node_types:
   Agent:
-    properties:
-      - name
-      - role
-      - source_uri
-      - created_by
-      - updated_by
-    introduced_in_version: 1
     concept_kind: AgentProfile
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Commitment:
-    properties:
-      - text
-      - due_date
-      - status
-      - source_uri
-      - relates_to_project_id
-      - relates_to_contract_id
     introduced_in_version: 1
+    last_used: null
+    properties:
+    - created_by
+    - name
+    - role
+    - source_uri
+    - updated_by
+    success_score: null
+    usage_count: 0
+  Commitment:
     concept_kind: CommitmentType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Concept:
-    properties:
-      - name
-      - kind
-      - description
-      - metadata
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - due_date
+    - name
+    - owner_id
+    - relates_to_contract_id
+    - relates_to_project_id
+    - source_uri
+    - status
+    - text
+    success_score: null
+    usage_count: 1
+  Concept:
     concept_kind: Form
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Contract:
-    properties:
-      - name
-      - sap_id
-      - value
-      - start_date
-      - end_date
-      - org_ids
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - description
+    - kind
+    - metadata
+    - name
+    - source_uri
+    success_score: null
+    usage_count: 1
+  Contract:
     concept_kind: ContractType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Interaction:
-    properties:
-      - type
-      - at
-      - sentiment
-      - summary
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - end_date
+    - name
+    - org_ids
+    - sap_id
+    - source_uri
+    - start_date
+    - value
+    success_score: null
+    usage_count: 1
+  Interaction:
     concept_kind: InteractionType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Issue:
-    properties:
-      - title
-      - description
-      - category
-      - status
-      - severity
-      - relates_to_project_ids
-      - relates_to_topic_ids
-      - related_risk_ids
-      - raised_in_interaction_id
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - at
+    - sentiment
+    - source_uri
+    - summary
+    - type
+    success_score: null
+    usage_count: 1
+  Issue:
     concept_kind: IssueCategory
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Org:
-    properties:
-      - name
-      - domain
-      - sector
-      - category
-      - source_uri
     introduced_in_version: 1
+    last_used: null
+    properties:
+    - category
+    - description
+    - raised_in_interaction_id
+    - related_risk_ids
+    - relates_to_project_ids
+    - relates_to_topic_ids
+    - severity
+    - source_uri
+    - status
+    - title
+    success_score: null
+    usage_count: 0
+  Org:
     concept_kind: OrgCategory
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Outcome:
-    properties:
-      - title
-      - description
-      - type
-      - realised_date
-      - associated_project_ids
-      - results_from_risk_ids
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - alternates
+    - category
+    - confidence
+    - domain
+    - identity_candidates
+    - identity_history
+    - name
+    - resolution_status
+    - sector
+    - source_uri
+    - temp_id
+    success_score: null
+    usage_count: 1
+  Outcome:
     concept_kind: OutcomeType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Person:
-    properties:
-      - name
-      - title
-      - email
-      - org_id
-      - type
-      - influence_score
-      - source_uri
     introduced_in_version: 1
+    last_used: null
+    properties:
+    - associated_project_ids
+    - description
+    - realised_date
+    - results_from_risk_ids
+    - source_uri
+    - title
+    - type
+    success_score: null
+    usage_count: 0
+  Person:
     concept_kind: StakeholderType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Project:
-    properties:
-      - name
-      - status
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - alternates
+    - confidence
+    - email
+    - identity_candidates
+    - identity_history
+    - influence_score
+    - name
+    - org_id
+    - resolution_status
+    - source_uri
+    - temp_id
+    - title
+    - type
+    success_score: null
+    usage_count: 1
+  Project:
     concept_kind: ProjectType
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Risk:
-    properties:
-      - title
-      - description
-      - category
-      - likelihood
-      - impact
-      - score
-      - status
-      - relates_to_project_ids
-      - relates_to_topic_ids
-      - results_in_outcome_ids
-      - identified_in_interaction_id
-      - source_uri
     introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - alternates
+    - confidence
+    - identity_candidates
+    - identity_history
+    - name
+    - resolution_status
+    - source_uri
+    - status
+    - temp_id
+    success_score: null
+    usage_count: 1
+  Risk:
     concept_kind: RiskCategory
     deprecated: false
-    usage_count: 0
-    last_used: null
-  Topic:
-    properties:
-      - name
-      - source_uri
     introduced_in_version: 1
+    last_used: null
+    properties:
+    - category
+    - description
+    - identified_in_interaction_id
+    - impact
+    - likelihood
+    - relates_to_project_ids
+    - relates_to_topic_ids
+    - results_in_outcome_ids
+    - score
+    - source_uri
+    - status
+    - title
+    success_score: null
+    usage_count: 0
+  Topic:
     concept_kind: TopicGroup
     deprecated: false
-    usage_count: 0
-    last_used: null
+    introduced_in_version: 1
+    last_used: '2025-12-19'
+    properties:
+    - name
+    - source_uri
+    success_score: null
+    usage_count: 1

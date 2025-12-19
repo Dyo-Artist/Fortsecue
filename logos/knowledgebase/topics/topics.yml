@@ -1,0 +1,18 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+topics:
+  - id: t_schedule
+    name: "Schedule"
+    description: "Timing, milestones, and delivery windows."
+  - id: t_budget
+    name: "Budget"
+    description: "Financials, cost control, and funding."
+  - id: t_resources
+    name: "Resources"
+    description: "Staffing, skills, and availability."
+  - id: t_governance
+    name: "Governance"
+    description: "Decision rights, approvals, and compliance."

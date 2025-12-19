@@ -1,6 +1,26 @@
 metadata:
-  version: "0.0.0"
+  version: "0.1.0"
   updated_at: "2024-01-01T00:00:00Z"
   updated_by: "system"
 
-stakeholder_types: []
+stakeholder_types:
+  - id: st_supplier
+    name: "Supplier"
+    description: "External organisation providing goods or services."
+    form_id: form_stakeholder
+    applies_to: ["Org"]
+  - id: st_regulator
+    name: "Regulator"
+    description: "Government or regulatory authority."
+    form_id: form_stakeholder
+    applies_to: ["Org"]
+  - id: st_community_rep
+    name: "Community Representative"
+    description: "Community or public representative."
+    form_id: form_stakeholder
+    applies_to: ["Person"]
+  - id: st_internal_sponsor
+    name: "Internal Sponsor"
+    description: "Internal leader accountable for outcomes."
+    form_id: form_stakeholder
+    applies_to: ["Person"]
