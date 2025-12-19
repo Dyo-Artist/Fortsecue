@@ -17,6 +17,8 @@ mid_term:
   importance_promotion_threshold: 0.85
   # Optional TTL override for pinned items (null means do not expire pinned items).
   pinned_ttl_seconds: null
+  # Number of recent interactions to keep in the running session summary.
+  session_history_size: 5
 
 long_term:
   # Maximum character length to persist; longer content will be summarised before persistence.
