@@ -99,6 +99,34 @@ def _normalise_text(value: str | None) -> str | None:
     return value.strip().lower() or None
 
 
+def _normalise_tokens(value: str | None) -> list[str]:
+    normalised = _normalise_text(value)
+    if not normalised:
+        return []
+    return [token for token in normalised.replace("_", " ").replace("-", " ").split() if token]
+
+
+def _token_signature(tokens: Sequence[str]) -> str:
+    return " ".join(sorted(tokens))
+
+
+def _similarity_ratio(left: Any, right: Any) -> float:
+    left_norm = _normalise_text(left)
+    right_norm = _normalise_text(right)
+    if left_norm is None or right_norm is None:
+        return 0.0
+
+    direct_ratio = SequenceMatcher(None, left_norm, right_norm).ratio()
+
+    left_tokens = _normalise_tokens(left_norm)
+    right_tokens = _normalise_tokens(right_norm)
+    if not left_tokens or not right_tokens:
+        return direct_ratio
+
+    token_ratio = SequenceMatcher(None, _token_signature(left_tokens), _token_signature(right_tokens)).ratio()
+    return max(direct_ratio, token_ratio)
+
+
 def _threshold_for(thresholds: Rules, category: str, key: str, default: float) -> float:
     defaults = thresholds.get("defaults", {}) if isinstance(thresholds.get("defaults"), dict) else {}
     section = thresholds.get(category, {}) if isinstance(thresholds.get(category), dict) else {}
@@ -106,14 +134,26 @@ def _threshold_for(thresholds: Rules, category: str, key: str, default: float) -
 
 
 def _is_similar(thresholds: Rules, category: str, key: str, left: Any, right: Any, default: float = 1.0) -> bool:
-    left_norm = _normalise_text(left)
-    right_norm = _normalise_text(right)
-    if left_norm is None or right_norm is None:
-        return False
-
+    similarity = _similarity_ratio(left, right)
     threshold = _threshold_for(thresholds, category, key, default)
-    similarity = SequenceMatcher(None, left_norm, right_norm).ratio()
     return similarity >= threshold
+
+
+def _similarity_score(thresholds: Rules, category: str, key: str, left: Any, right: Any, default: float = 1.0) -> float:
+    similarity = _similarity_ratio(left, right)
+    threshold = _threshold_for(thresholds, category, key, default)
+    return similarity if similarity >= threshold else 0.0
+
+
+def _extract_domain(value: str | None) -> str | None:
+    if not value:
+        return None
+    text = _normalise_text(value)
+    if not text:
+        return None
+    if "@" in text:
+        return text.split("@")[-1]
+    return text
 
 
 def _append_history(
@@ -259,39 +299,52 @@ class GraphEntityResolver:
         matched_fields: list[str] = []
         components: list[float] = []
 
-        if _is_similar(self._thresholds, category, "email_similarity", entity.get("email"), candidate.get("email")):
-            components.append(float(rules.get("email_score", 1.0)))
+        email_similarity = _similarity_score(
+            self._thresholds, category, "email_similarity", entity.get("email"), candidate.get("email")
+        )
+        if email_similarity:
+            components.append(float(rules.get("email_score", 1.0)) * email_similarity)
             matched_fields.append("email")
-        if _is_similar(self._thresholds, category, "phone_similarity", entity.get("phone"), candidate.get("phone")):
-            components.append(float(rules.get("phone_score", 1.0)))
+
+        entity_domain = _extract_domain(entity.get("domain")) or _extract_domain(entity.get("email"))
+        candidate_domain = _extract_domain(candidate.get("domain")) or _extract_domain(candidate.get("email"))
+        if not candidate_domain:
+            candidate_domain = _extract_domain(candidate.get("org_domain"))
+
+        phone_similarity = _similarity_score(
+            self._thresholds, category, "phone_similarity", entity.get("phone"), candidate.get("phone")
+        )
+        if phone_similarity:
+            components.append(float(rules.get("phone_score", 1.0)) * phone_similarity)
             matched_fields.append("phone")
 
-        name_match = _is_similar(
+        name_similarity = _similarity_score(
             self._thresholds, category, "name_similarity", entity.get("name"), candidate.get("name")
         )
-        org_match = _is_similar(
+        org_similarity = _similarity_score(
             self._thresholds, category, "org_similarity", entity.get("org_id"), candidate.get("org_id")
-        ) or _is_similar(
+        ) or _similarity_score(
             self._thresholds, category, "org_similarity", entity.get("org_name"), candidate.get("org_name")
         )
+        domain_similarity = _similarity_score(
+            self._thresholds, category, "domain_similarity", entity_domain, candidate_domain
+        )
 
-        if name_match and org_match:
-            components.append(float(rules.get("name_org_score", 0.0)))
+        if name_similarity and org_similarity:
+            components.append(float(rules.get("name_org_score", 0.0)) * max(name_similarity, org_similarity))
             matched_fields.append("name_org")
-        elif name_match:
-            components.append(float(rules.get("name_only_score", 0.0)))
+        elif name_similarity:
+            components.append(float(rules.get("name_only_score", 0.0)) * name_similarity)
             matched_fields.append("name")
 
-        if _is_similar(
-            self._thresholds, category, "domain_similarity", entity.get("domain"), candidate.get("domain")
-        ):
-            components.append(float(rules.get("domain_score", 0.0)))
+        if domain_similarity:
+            components.append(float(rules.get("domain_score", 0.0)) * domain_similarity)
             matched_fields.append("domain")
 
-        if name_match and "name_score" in rules:
-            components.append(float(rules.get("name_score", 0.0)))
+        if name_similarity and "name_score" in rules:
+            components.append(float(rules.get("name_score", 0.0)) * name_similarity)
 
-        base_score = max(components) if components else 0.0
+        base_score = sum(components) if components else 0.0
         context_bonus, context_hits = self._contextual_bonus(category, candidate, preview_context, rules)
         if context_hits:
             matched_fields.extend([f"context:{key}" for key in context_hits.keys()])
@@ -413,25 +466,29 @@ class GraphEntityResolver:
     def _lookup_org_candidates(self, org: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
         name = org.get("name")
         domain = org.get("domain")
-        if not name and not domain:
+        name_tokens = _normalise_tokens(name)
+        if not name and not domain and not name_tokens:
             return []
         return self._run_query(
             (
                 "MATCH (o:Org) "
                 "OPTIONAL MATCH (o)-[:INVOLVED_IN]->(p:Project) "
-                "WHERE ($name IS NOT NULL AND toLower(o.name) = toLower($name)) "
+                "WHERE ($name IS NOT NULL AND toLower(o.name) CONTAINS toLower($name)) "
                 "   OR ($domain IS NOT NULL AND toLower(o.domain) = toLower($domain)) "
+                "   OR (SIZE($name_tokens) > 0 AND ANY(token IN $name_tokens WHERE toLower(o.name) CONTAINS token)) "
                 "RETURN o.id AS id, o.name AS name, o.domain AS domain, o.region AS region, o.country AS country, "
                 "       collect(DISTINCT p.id) AS project_ids, collect(DISTINCT p.name) AS project_names"
             ),
-            {"name": name, "domain": domain},
+            {"name": name, "domain": domain, "name_tokens": name_tokens},
         )
 
     def _lookup_person_candidates(self, person: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:
         name = person.get("name")
         email = person.get("email")
         phone = person.get("phone")
-        if not any([name, email, phone]):
+        domain = _extract_domain(email) or _extract_domain(person.get("domain"))
+        name_tokens = _normalise_tokens(name)
+        if not any([name, email, phone, domain]):
             return []
         return self._run_query(
             (
@@ -441,15 +498,19 @@ class GraphEntityResolver:
                 "WITH p, o, collect(DISTINCT proj) AS projects "
                 "OPTIONAL MATCH (p)-[:PARTICIPATED_IN]->(:Interaction)-[:HAS_SOURCE]->(d:Document) "
                 "WITH p, o, projects, collect(DISTINCT d) AS documents "
-                "WHERE ($name IS NOT NULL AND toLower(p.name) = toLower($name)) "
+                "WHERE ($name IS NOT NULL AND toLower(p.name) CONTAINS toLower($name)) "
+                "   OR (SIZE($name_tokens) > 0 AND ANY(token IN $name_tokens WHERE toLower(p.name) CONTAINS token)) "
                 "   OR ($email IS NOT NULL AND toLower(p.email) = toLower($email)) "
                 "   OR ($phone IS NOT NULL AND p.phone = $phone) "
-                "RETURN p.id AS id, p.name AS name, p.email AS email, p.phone AS phone, o.id AS org_id, o.name AS org_name, "
+                "   OR ($domain IS NOT NULL AND toLower(p.email) ENDS WITH $domain) "
+                "   OR ($domain IS NOT NULL AND toLower(o.domain) ENDS WITH $domain) "
+                "RETURN p.id AS id, p.name AS name, p.email AS email, p.phone AS phone, "
+                "       o.id AS org_id, o.name AS org_name, o.domain AS org_domain, "
                 "       [proj IN projects | proj.id] AS project_ids, [proj IN projects | proj.name] AS project_names, "
                 "       [doc IN documents | doc.id] AS document_ids, "
                 "       [doc IN documents | coalesce(doc.title, doc.name)] AS document_titles"
             ),
-            {"name": name, "email": email, "phone": phone},
+            {"name": name, "email": email, "phone": phone, "domain": domain, "name_tokens": name_tokens},
         )
 
     def _lookup_project_candidates(self, project: Mapping[str, Any]) -> Sequence[Mapping[str, Any]]:

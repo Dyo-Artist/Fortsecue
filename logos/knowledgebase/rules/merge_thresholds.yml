@@ -5,31 +5,31 @@ metadata:
   updated_by: "system"
 
 defaults:
-  name_similarity: 1.0
-  org_similarity: 1.0
-  domain_similarity: 1.0
-  email_similarity: 1.0
-  phone_similarity: 1.0
+  name_similarity: 0.85
+  org_similarity: 0.85
+  domain_similarity: 0.95
+  email_similarity: 0.97
+  phone_similarity: 0.98
   project_similarity: 0.8
   document_similarity: 0.8
   location_similarity: 0.7
-  ambiguity_gap: 0.05
+  ambiguity_gap: 0.1
 
 org:
-  name_similarity: 1.0
-  domain_similarity: 1.0
+  name_similarity: 0.85
+  domain_similarity: 0.95
   project_similarity: 0.7
   location_similarity: 0.7
 
 person:
-  name_similarity: 1.0
-  org_similarity: 1.0
-  email_similarity: 1.0
-  phone_similarity: 1.0
+  name_similarity: 0.85
+  org_similarity: 0.85
+  email_similarity: 0.97
+  phone_similarity: 0.98
   project_similarity: 0.7
   document_similarity: 0.8
   location_similarity: 0.7
 
 project:
-  name_similarity: 1.0
+  name_similarity: 0.9
   location_similarity: 0.7
