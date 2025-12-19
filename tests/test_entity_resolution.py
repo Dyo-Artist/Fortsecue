@@ -96,6 +96,8 @@ def test_low_confidence_person_does_not_resolve():
     assert person["id"] == "p_temp"
     assert person.get("best_guess_id") == "p_existing"
     assert person.get("resolution_status") == "ambiguous"
+    assert person.get("confidence_level") == "medium"
+    assert person.get("needs_review") is True
     assert resolved.get("resolution_log")
 
 
@@ -165,6 +167,61 @@ def test_context_boosts_candidate_and_retains_alternates():
     assert person["canonical_id"] == "p_context"
     assert person["id"] == "p_context"
     assert any(candidate["id"] == "p_else" for candidate in person.get("alternates", []))
+    assert resolved.get("resolution_log", []) == []
+
+
+def test_context_ranks_candidates_and_sets_confidence_flags():
+    preview = {
+        "context": {"org": {"id": "o_context", "name": "Context Org"}, "domain": "acme.com"},
+        "entities": {
+            "persons": [
+                {
+                    "id": "p_temp",
+                    "name": "Jane Smith",
+                }
+            ],
+        },
+        "relationships": [],
+    }
+
+    rules = {
+        "defaults": {
+            "min_confidence": 0.5,
+            "candidate_floor": 0.1,
+            "context": {"org_score": 0.4, "domain_score": 0.2},
+            "confidence_levels": {"high": 0.5, "medium": 0.3},
+            "review": {"statuses": ["ambiguous", "multi_resolved"], "min_confidence_level": "medium"},
+        },
+        "person": {"name_only_score": 0.3, "min_confidence": 0.5, "context": {"org_score": 0.4, "domain_score": 0.2}},
+    }
+    thresholds = {"defaults": {"name_similarity": 1.0, "org_similarity": 0.85, "domain_similarity": 0.95}}
+    resolver = GraphEntityResolver(
+        lambda _q, _p: [
+            {
+                "id": "p_org",
+                "name": "Jane Smith",
+                "org_id": "o_context",
+                "org_name": "Context Org",
+                "org_domain": "acme.com",
+            },
+            {
+                "id": "p_other",
+                "name": "Jane Smith",
+                "org_id": "o_other",
+                "org_name": "Other Org",
+                "org_domain": "other.com",
+            },
+        ],
+        rules=rules,
+        thresholds=thresholds,
+    )
+
+    resolved = resolver.resolve_preview(preview)
+    person = resolved["entities"]["persons"][0]
+    assert person["canonical_id"] == "p_org"
+    assert person["confidence_level"] == "high"
+    assert person.get("needs_review") is False
+    assert any(candidate["id"] == "p_other" for candidate in person.get("alternates", []))
     assert resolved.get("resolution_log", []) == []
 
 

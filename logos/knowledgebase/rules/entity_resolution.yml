@@ -9,10 +9,21 @@ defaults:
   candidate_floor: 0.5
   max_alternates: 3
   domain_score: 0.6
+  confidence_levels:
+    high: 0.9
+    medium: 0.6
+  review:
+    statuses:
+      - ambiguous
+      - unresolved
+      - multi_resolved
+    min_confidence_level: medium
   context:
     project_score: 0.2
     document_score: 0.15
     location_score: 0.1
+    domain_score: 0.1
+    org_score: 0.2
 
 org:
   name_score: 0.9
@@ -22,6 +33,8 @@ org:
   context:
     project_score: 0.25
     location_score: 0.1
+    domain_score: 0.15
+    org_score: 0.25
 
 person:
   email_score: 1.0
@@ -35,6 +48,8 @@ person:
     project_score: 0.25
     document_score: 0.15
     location_score: 0.1
+    domain_score: 0.2
+    org_score: 0.25
 
 project:
   name_score: 0.9
@@ -42,3 +57,4 @@ project:
   candidate_floor: 0.5
   context:
     location_score: 0.15
+    org_score: 0.15

@@ -163,6 +163,8 @@ def _append_history(
     canonical_id: str | None,
     confidence: float,
     best_guess_id: str | None,
+    confidence_level: str | None = None,
+    needs_review: bool | None = None,
 ) -> list[Dict[str, Any]]:
     existing = entity.get("identity_history") if isinstance(entity, Mapping) else None
     history = list(existing) if isinstance(existing, list) else []
@@ -173,6 +175,8 @@ def _append_history(
             "canonical_id": canonical_id,
             "best_guess_id": best_guess_id,
             "confidence": confidence,
+            "confidence_level": confidence_level,
+            "needs_review": needs_review,
             "candidates": [
                 {"id": candidate.get("id"), "score": candidate.get("score")}
                 for candidate in candidates
@@ -231,6 +235,55 @@ class GraphEntityResolver:
     def _ambiguity_gap(self, category: str) -> float:
         return _threshold_for(self._thresholds, category, "ambiguity_gap", 0.0)
 
+    def _confidence_levels(self, category: str) -> Dict[str, float]:
+        defaults = self._rules.get("defaults", {}) if isinstance(self._rules.get("defaults"), dict) else {}
+        section = self._rules.get(category, {}) if isinstance(self._rules.get(category), dict) else {}
+        default_levels = defaults.get("confidence_levels", {}) if isinstance(defaults.get("confidence_levels"), dict) else {}
+        section_levels = section.get("confidence_levels", {}) if isinstance(section.get("confidence_levels"), dict) else {}
+        merged = dict(default_levels)
+        merged.update(section_levels)
+        return {
+            "high": float(merged.get("high", self._min_confidence(category))),
+            "medium": float(merged.get("medium", self._candidate_floor(category))),
+        }
+
+    def _confidence_level(self, category: str, confidence: float) -> str:
+        levels = self._confidence_levels(category)
+        high_threshold = levels.get("high", 1.0)
+        medium_threshold = levels.get("medium", 0.0)
+        if confidence >= high_threshold:
+            return "high"
+        if confidence >= medium_threshold:
+            return "medium"
+        return "low"
+
+    def _review_policy(self, category: str) -> Dict[str, Any]:
+        defaults = self._rules.get("defaults", {}) if isinstance(self._rules.get("defaults"), dict) else {}
+        section = self._rules.get(category, {}) if isinstance(self._rules.get(category), dict) else {}
+        default_policy = defaults.get("review", {}) if isinstance(defaults.get("review"), dict) else {}
+        section_policy = section.get("review", {}) if isinstance(section.get("review"), dict) else {}
+        merged = dict(default_policy)
+        merged.update(section_policy)
+        statuses = merged.get("statuses", ["ambiguous", "unresolved", "multi_resolved"])
+        min_level = merged.get("min_confidence_level")
+        parsed_statuses = [status for status in _as_list(statuses) if isinstance(status, str)]
+        return {"statuses": parsed_statuses, "min_confidence_level": str(min_level) if min_level else None}
+
+    def _needs_review(self, category: str, status: str, confidence_level: str) -> tuple[bool, list[str]]:
+        policy = self._review_policy(category)
+        reasons: list[str] = []
+        if status and status in set(policy.get("statuses", [])):
+            reasons.append(f"status:{status}")
+
+        min_level = policy.get("min_confidence_level")
+        if min_level:
+            order = ["low", "medium", "high"]
+            if min_level in order and confidence_level in order:
+                if order.index(confidence_level) < order.index(min_level):
+                    reasons.append(f"confidence_below:{min_level}")
+
+        return bool(reasons), reasons
+
     def _context_overlap(
         self, category: str, threshold_key: str, context_values: Sequence[Any], candidate_values: Sequence[Any]
     ) -> list[Dict[str, Any]]:
@@ -244,21 +297,24 @@ class GraphEntityResolver:
     def _contextual_bonus(
         self,
         category: str,
+        entity: Mapping[str, Any],
         candidate: Mapping[str, Any],
         preview_context: Mapping[str, Any],
         rules: Mapping[str, Any],
     ) -> tuple[float, Dict[str, Any]]:
         context_rules = self._context_rules(category)
-        if not context_rules or not isinstance(preview_context, Mapping):
+        if not context_rules:
             return 0.0, {}
 
         bonus = 0.0
         hits: dict[str, Any] = {}
+        entity_context = entity if isinstance(entity, Mapping) else {}
+        preview_ctx = preview_context if isinstance(preview_context, Mapping) else {}
 
         project_matches = self._context_overlap(
             category,
             "project_similarity",
-            _extract_context_values(preview_context, "project"),
+            _extract_context_values(preview_ctx, "project"),
             _as_list(candidate.get("project_ids")) + _as_list(candidate.get("project_names")),
         )
         if project_matches and "project_score" in context_rules:
@@ -268,17 +324,63 @@ class GraphEntityResolver:
         document_matches = self._context_overlap(
             category,
             "document_similarity",
-            _extract_context_values(preview_context, "document"),
+            _extract_context_values(preview_ctx, "document"),
             _as_list(candidate.get("document_ids")) + _as_list(candidate.get("document_titles")),
         )
         if document_matches and "document_score" in context_rules:
             bonus += float(context_rules.get("document_score", 0.0))
             hits["documents"] = document_matches
 
+        org_context = _extract_context_values(preview_ctx, "org") + _extract_context_values(entity_context, "org")
+        org_matches = self._context_overlap(
+            category,
+            "org_similarity",
+            org_context,
+            _as_list(candidate.get("org_id")) + _as_list(candidate.get("org_name")),
+        )
+        if org_matches and "org_score" in context_rules:
+            bonus += float(context_rules.get("org_score", 0.0))
+            hits["orgs"] = org_matches
+
+        domain_context_values = []
+        for value in _extract_context_values(preview_ctx, "domain") + _extract_context_values(preview_ctx, "email"):
+            domain = _extract_domain(value)
+            if domain:
+                domain_context_values.append(domain)
+
+        for value in (
+            entity_context.get("domain"),
+            entity_context.get("org_domain"),
+            _extract_domain(entity_context.get("email")),
+        ):
+            domain = _extract_domain(value) if value else None
+            if domain:
+                domain_context_values.append(domain)
+
+        candidate_domains = [
+            domain
+            for domain in (
+                _extract_domain(candidate.get("domain")),
+                _extract_domain(candidate.get("email")),
+                _extract_domain(candidate.get("org_domain")),
+            )
+            if domain
+        ]
+
+        domain_matches = self._context_overlap(
+            category,
+            "domain_similarity",
+            domain_context_values,
+            candidate_domains,
+        )
+        if domain_matches and "domain_score" in context_rules:
+            bonus += float(context_rules.get("domain_score", 0.0))
+            hits["domains"] = domain_matches
+
         location_matches = self._context_overlap(
             category,
             "location_similarity",
-            _extract_context_values(preview_context, "location"),
+            _extract_context_values(preview_ctx, "location"),
             _as_list(candidate.get("location")) + _as_list(candidate.get("region")) + _as_list(candidate.get("country")),
         )
         if location_matches and "location_score" in context_rules:
@@ -345,7 +447,7 @@ class GraphEntityResolver:
             components.append(float(rules.get("name_score", 0.0)) * name_similarity)
 
         base_score = sum(components) if components else 0.0
-        context_bonus, context_hits = self._contextual_bonus(category, candidate, preview_context, rules)
+        context_bonus, context_hits = self._contextual_bonus(category, entity, candidate, preview_context, rules)
         if context_hits:
             matched_fields.extend([f"context:{key}" for key in context_hits.keys()])
 
@@ -395,6 +497,7 @@ class GraphEntityResolver:
         best = candidates_above_floor[0] if candidates_above_floor else None
         best_guess_id = best.get("id") if best else None
         confidence = float(best.get("score", 0.0)) if best else 0.0
+        confidence_level = self._confidence_level(category, confidence)
 
         canonical_id: str | None = None
         status = "unresolved"
@@ -422,8 +525,10 @@ class GraphEntityResolver:
             for candidate in candidates_above_floor[: max_alternates + 1]
         ]
 
+        needs_review, review_reasons = self._needs_review(category, status, confidence_level)
         updated["canonical_id"] = canonical_id
         updated["confidence"] = confidence
+        updated["confidence_level"] = confidence_level
         updated["best_guess_id"] = best_guess_id
         if canonical_id:
             updated["id"] = canonical_id
@@ -433,6 +538,9 @@ class GraphEntityResolver:
         updated["identity_candidates"] = candidate_view
         updated["alternates"] = [candidate for candidate in candidate_view if candidate.get("id") != canonical_id]
         updated["resolution_status"] = status
+        updated["needs_review"] = needs_review
+        if review_reasons:
+            updated["review_reasons"] = review_reasons
         updated["identity_history"] = _append_history(
             entity,
             status,
@@ -440,6 +548,8 @@ class GraphEntityResolver:
             canonical_id,
             confidence,
             best_guess_id,
+            confidence_level,
+            needs_review,
         )
         return updated, canonical_id
 
@@ -448,7 +558,8 @@ class GraphEntityResolver:
             return
 
         status = entity.get("resolution_status")
-        if status in (None, "resolved"):
+        needs_review = bool(entity.get("needs_review"))
+        if status in (None, "resolved") and not needs_review:
             return
 
         log.append(
@@ -460,6 +571,9 @@ class GraphEntityResolver:
                 "resolution_status": status,
                 "candidates": entity.get("identity_candidates", []),
                 "confidence": entity.get("confidence"),
+                "confidence_level": entity.get("confidence_level"),
+                "needs_review": needs_review,
+                "review_reasons": entity.get("review_reasons", []),
             }
         )
 
@@ -632,6 +746,8 @@ def reassign_preview_identities(preview: Mapping[str, Any], reassignment: Mappin
                 updated.get("canonical_id"),
                 float(updated.get("confidence", 0.0)),
                 updated.get("best_guess_id"),
+                updated.get("confidence_level"),
+                updated.get("needs_review"),
             )
             remapped.append(updated)
         entities[category] = remapped
