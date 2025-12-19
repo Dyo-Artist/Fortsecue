@@ -82,7 +82,12 @@ def test_upsert_node_merges_by_id_only(tmp_path):
     tx = FakeTx()
     now = datetime(2024, 2, 1, tzinfo=timezone.utc)
     store = _temp_schema(tmp_path)
-    node = GraphNode(id="person-1", label="Person", properties={"name": "Ada", "title": "Engineer"})
+    node = GraphNode(
+        id="person-1",
+        label="Person",
+        properties={"name": "Ada", "title": "Engineer"},
+        source_uri="source://test",
+    )
 
     upsert_node(tx, node, now, schema_store=store)
 
@@ -133,3 +138,32 @@ def test_upsert_interaction_bundle_handles_dynamic_nodes(tmp_path):
     assert any("MENTIONS" in stmt for stmt in cypher_statements)
     node_types = yaml.safe_load((tmp_path / "node_types.yml").read_text())["node_types"]
     assert "Milestone" in node_types
+
+
+def test_upsert_interaction_bundle_defaults_missing_source(tmp_path):
+    tx = FakeTx()
+    now = datetime(2024, 4, 1, tzinfo=timezone.utc)
+    store = _temp_schema(tmp_path)
+    interaction = GraphNode(
+        id="i2",
+        label="Interaction",
+        properties={},
+        concept_kind="InteractionType",
+    )
+    node = GraphNode(id="p2", label="Person", properties={"name": "Test"})
+    relationship = GraphRelationship(
+        src="i2",
+        dst="p2",
+        rel="MENTIONS",
+        src_label="Interaction",
+        dst_label="Person",
+    )
+    bundle = InteractionBundle(interaction=interaction, nodes=[node], relationships=[relationship])
+
+    upsert_interaction_bundle(tx, bundle, now, schema_store=store)
+
+    default_source_uri = f"interaction://{interaction.id}"
+    node_call = tx.calls[0][1]
+    assert node_call["source_uri"] == default_source_uri
+    rel_call = next(call[1] for call in tx.calls if "MERGE (src)-[r" in call[0])
+    assert rel_call["source_uri"] == default_source_uri
