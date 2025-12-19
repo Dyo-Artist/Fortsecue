@@ -112,7 +112,7 @@ def test_similarity_thresholds_used_for_partial_match():
         "relationships": [],
     }
 
-    rules = {"person": {"name_only_score": 0.95, "min_confidence": 0.9}}
+    rules = {"person": {"name_only_score": 0.95, "min_confidence": 0.8}}
     thresholds = {"defaults": {"name_similarity": 0.8}}
     resolver = GraphEntityResolver(
         lambda _q, _p: [
@@ -166,6 +166,44 @@ def test_context_boosts_candidate_and_retains_alternates():
     assert person["id"] == "p_context"
     assert any(candidate["id"] == "p_else" for candidate in person.get("alternates", []))
     assert resolved.get("resolution_log", []) == []
+
+
+def test_domain_similarity_supports_fuzzy_person_resolution():
+    preview = {
+        "entities": {
+            "persons": [
+                {
+                    "id": "p_temp",
+                    "name": "Bob Smith",
+                    "email": "bob.smith@acme.com",
+                }
+            ]
+        },
+        "relationships": [],
+    }
+
+    rules = {"person": {"name_only_score": 0.6, "domain_score": 1.0, "min_confidence": 0.7}}
+    thresholds = {"person": {"name_similarity": 0.65, "domain_similarity": 0.95, "email_similarity": 0.97}}
+    resolver = GraphEntityResolver(
+        lambda _q, _p: [
+            {
+                "id": "p_robert",
+                "name": "Robert J. Smith",
+                "email": None,
+                "org_domain": "acme.com",
+                "org_id": "o_acme",
+                "org_name": "ACME Corporation",
+            }
+        ],
+        rules=rules,
+        thresholds=thresholds,
+    )
+
+    resolved = resolver.resolve_preview(preview)
+    person = resolved["entities"]["persons"][0]
+    assert person["canonical_id"] == "p_robert"
+    assert person["id"] == "p_robert"
+    assert person.get("resolution_status") == "resolved"
 
 
 def test_reassign_preview_identities_updates_relationships_and_history():

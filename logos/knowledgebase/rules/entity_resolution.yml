@@ -8,6 +8,7 @@ defaults:
   min_confidence: 0.9
   candidate_floor: 0.5
   max_alternates: 3
+  domain_score: 0.6
   context:
     project_score: 0.2
     document_score: 0.15
@@ -25,6 +26,7 @@ org:
 person:
   email_score: 1.0
   phone_score: 1.0
+  domain_score: 0.7
   name_org_score: 0.92
   name_only_score: 0.6
   min_confidence: 0.9
