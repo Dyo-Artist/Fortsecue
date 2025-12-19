@@ -1,0 +1,18 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+issue_categories:
+  - id: ic_scope
+    name: "Scope"
+    description: "Scope clarity, creep, or alignment issues."
+    form_id: form_issue
+  - id: ic_quality
+    name: "Quality"
+    description: "Quality defects or acceptance concerns."
+    form_id: form_issue
+  - id: ic_dependency
+    name: "Dependency"
+    description: "Blocked by dependencies or prerequisites."
+    form_id: form_issue

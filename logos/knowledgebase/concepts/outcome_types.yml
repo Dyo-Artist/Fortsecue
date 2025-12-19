@@ -1,0 +1,18 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+outcome_types:
+  - id: ot_deliverable
+    name: "Deliverable"
+    description: "Concrete deliverable produced or shared."
+    form_id: form_outcome
+  - id: ot_decision
+    name: "Decision"
+    description: "Decision or approval made by stakeholders."
+    form_id: form_outcome
+  - id: ot_change
+    name: "Change"
+    description: "Change in plan, scope, or approach."
+    form_id: form_outcome
