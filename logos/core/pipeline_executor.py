@@ -12,7 +12,14 @@ from pydantic import BaseModel
 
 from logos.ingest import doc_ingest, note_ingest
 from logos.interfaces.local_asr_stub import TranscriptionFailure
-from logos.models.bundles import InteractionMeta, PipelineBundle, RawInputBundle
+from logos.models.bundles import (
+    ExtractionBundle,
+    InteractionMeta,
+    PipelineBundle,
+    PreviewBundle,
+    RawInputBundle,
+)
+from logos.staging.store import StagingStore
 from logos.workflows import stages as legacy_stages
 
 DEFAULT_PIPELINE_PATH = Path(__file__).resolve().parent.parent / "knowledgebase" / "pipelines.yml"
@@ -264,9 +271,29 @@ def stage_normalise(bundle: Any, ctx: PipelineContext) -> Any:
 
 
 @STAGE_REGISTRY.register("preview.assemble")
-def stage_preview(bundle: Any, ctx: PipelineContext) -> Any:
+def stage_preview(bundle: Any, ctx: PipelineContext) -> PreviewBundle:
     context = ctx.to_mapping()
-    return legacy_stages.build_preview_payload(bundle, context)
+    if not isinstance(bundle, ExtractionBundle):
+        raise TypeError("preview.assemble expects an ExtractionBundle")
+
+    preview_payload = legacy_stages.build_preview_payload(bundle, context)
+    preview = preview_payload if isinstance(preview_payload, PreviewBundle) else PreviewBundle.model_validate(preview_payload)
+
+    staging_store = context.get("staging_store")
+    if isinstance(staging_store, StagingStore):
+        interaction_id = preview.meta.interaction_id
+        staging_store.save_preview(interaction_id, preview)
+        staging_store.set_state(interaction_id, "preview_ready")
+        ctx.logger.info(
+            "preview_ready",
+            extra={"interaction_id": interaction_id, "stage": "preview.assemble"},
+        )
+
+    pending = context.get("pending_interactions")
+    if isinstance(pending, MutableMapping):
+        pending[preview.meta.interaction_id] = preview.model_dump(mode="json")
+
+    return preview
 
 
 @STAGE_REGISTRY.register("commit.validate")

@@ -65,59 +65,6 @@ async def updates(websocket: WebSocket) -> None:
         await update_broadcaster.unregister(websocket)
 
 
-def _persist_preview(
-    store: LocalStagingStore,
-    meta: InteractionMeta,
-):
-    def _inner(
-        interaction_id: str, interaction_meta: Dict[str, Any], extraction: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        entities_raw = extraction.get("entities", {}) if isinstance(extraction, dict) else {}
-        preview_entities: Dict[str, list[Dict[str, Any]] | list] = {}
-        if isinstance(entities_raw, dict):
-            for key, value in entities_raw.items():
-                values = value if isinstance(value, list) else [value]
-                preview_entities[key] = [
-                    item
-                    if isinstance(item, Mapping)
-                    else {"temp_id": str(item), "name": str(item), "is_new": True}
-                    for item in values
-                ]
-
-        relationships_raw = extraction.get("relationships", []) if isinstance(extraction, dict) else []
-        preview_relationships: list[Dict[str, Any]] = []
-        if isinstance(relationships_raw, list):
-            for rel in relationships_raw:
-                if isinstance(rel, Mapping):
-                    preview_relationships.append(rel)
-
-        preview_payload = {
-            "interaction": {
-                "id": interaction_id,
-                "type": interaction_meta.get("type") or meta.interaction_type,
-                "at": interaction_meta.get("at"),
-                "source_uri": interaction_meta.get("source_uri") or meta.source_uri,
-                "sentiment": extraction.get("sentiment"),
-                "summary": extraction.get("summary"),
-            },
-            "entities": preview_entities,
-            "relationships": preview_relationships,
-            "ready": True,
-        }
-        PENDING_INTERACTIONS[interaction_id] = preview_payload
-        preview_bundle = PreviewBundle(
-            meta=meta,
-            interaction=preview_payload["interaction"],
-            entities=preview_payload.get("entities", {}),
-            relationships=preview_payload.get("relationships", []),
-        )
-        store.save_preview(interaction_id, preview_bundle)
-        store.set_state(interaction_id, "preview_ready")
-        return preview_payload
-
-    return _inner
-
-
 @app.post("/ingest/doc")
 async def ingest_doc(doc: Doc) -> dict[str, object]:
     """Ingest plain text documents and return an interaction id."""
@@ -139,15 +86,20 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "document",
             "source_uri": doc.source_uri,
-            "persist_preview": _persist_preview(STAGING_STORE, meta),
+            "staging_store": STAGING_STORE,
+            "pending_interactions": PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
         STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        logger.exception("doc_ingest_failed", extra={"interaction_id": interaction_id})
         raise
-    return {"interaction_id": interaction_id, "preview": preview}
+    preview_payload = (
+        preview.model_dump(mode="json") if isinstance(preview, PreviewBundle) else preview
+    )
+    return {"interaction_id": interaction_id, "preview_ready": True, "preview": preview_payload}
 
 
 @app.post("/ingest/note")
@@ -174,15 +126,20 @@ async def ingest_note(note: Note) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "note",
             "source_uri": note.source_uri or "",
-            "persist_preview": _persist_preview(STAGING_STORE, meta),
+            "staging_store": STAGING_STORE,
+            "pending_interactions": PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
         STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        logger.exception("note_ingest_failed", extra={"interaction_id": interaction_id})
         raise
-    return {"interaction_id": interaction_id, "preview": preview}
+    preview_payload = (
+        preview.model_dump(mode="json") if isinstance(preview, PreviewBundle) else preview
+    )
+    return {"interaction_id": interaction_id, "preview_ready": True, "preview": preview_payload}
 
 
 @app.post("/ui/ingest/doc")
@@ -284,15 +241,20 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "audio",
             "source_uri": payload.source_uri,
-            "persist_preview": _persist_preview(STAGING_STORE, meta),
+            "staging_store": STAGING_STORE,
+            "pending_interactions": PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
         STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        logger.exception("audio_ingest_failed", extra={"interaction_id": interaction_id})
         raise
-    return {"interaction_id": interaction_id, "preview": preview}
+    preview_payload = (
+        preview.model_dump(mode="json") if isinstance(preview, PreviewBundle) else preview
+    )
+    return {"interaction_id": interaction_id, "preview_ready": True, "preview": preview_payload}
 
 
 @app.get("/api/v1/interactions/{interaction_id}/preview")
