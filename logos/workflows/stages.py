@@ -60,6 +60,21 @@ def _merge_updates(target: Dict[str, list[str]], incoming: Mapping[str, Any] | N
     return target
 
 
+def _normalise_preview_entities(value: Any) -> List[PreviewEntity]:
+    """Coerce any entity collection into PreviewEntity instances."""
+
+    items = value if isinstance(value, list) else [value]
+    normalised_entities: List[PreviewEntity] = []
+    for item in items:
+        if isinstance(item, PreviewEntity):
+            normalised_entities.append(item)
+        elif isinstance(item, Mapping):
+            normalised_entities.append(PreviewEntity.model_validate(item))
+        else:
+            normalised_entities.append(PreviewEntity(temp_id=str(item), name=str(item), is_new=True))
+    return normalised_entities
+
+
 def _coerce_meta(meta_candidate: Any, context: Dict[str, Any]) -> InteractionMeta:
     """Build or coerce InteractionMeta from incoming payload or context."""
 
@@ -318,18 +333,7 @@ def build_preview_payload(bundle: ExtractionBundle, context: Dict[str, Any] | No
     preview_entities: Dict[str, List[PreviewEntity]] = {}
     if isinstance(entities, Mapping):
         for key, value in entities.items():
-            if isinstance(value, list):
-                normalised_entities: List[PreviewEntity] = []
-                for item in value:
-                    if isinstance(item, PreviewEntity):
-                        normalised_entities.append(item)
-                    elif isinstance(item, Mapping):
-                        normalised_entities.append(PreviewEntity.model_validate(item))
-                    else:
-                        normalised_entities.append(
-                            PreviewEntity(temp_id=str(item), name=str(item), is_new=True)
-                        )
-                preview_entities[key] = normalised_entities
+            preview_entities[key] = _normalise_preview_entities(value)
 
     preview_relationships: List[Relationship] = []
     if isinstance(relationships, list):
