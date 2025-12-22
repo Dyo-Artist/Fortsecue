@@ -1,0 +1,19 @@
+metadata:
+  version: "0.1.0"
+  updated_at: "2024-06-01T00:00:00Z"
+  updated_by: "system"
+
+pipeline.interaction_ingest:
+  stages:
+    - ingest.validate_input
+    - ingest.parse_or_transcribe
+    - nlp.extract
+    - normalise.resolve_entities
+    - preview.assemble
+
+pipeline.interaction_commit:
+  stages:
+    - commit.validate
+    - graph.upsert
+    - alerts.evaluate
+    - learn.capture_feedback
