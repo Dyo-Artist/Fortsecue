@@ -142,6 +142,13 @@ async def ingest_note(note: Note) -> dict[str, object]:
     return {"interaction_id": interaction_id, "preview_ready": True, "preview": preview_payload}
 
 
+@app.post("/api/v1/ingest/text")
+async def ingest_text_api(note: Note) -> dict[str, object]:
+    """Versioned alias for note ingestion used by tooling and docs."""
+
+    return await ingest_note(note)
+
+
 @app.post("/ui/ingest/doc")
 async def ui_ingest_doc(request: Request):
     form = await request.form()

@@ -36,3 +36,15 @@ def test_ingest_note_minimal_payload() -> None:
     assert data["preview_ready"] is True
     assert data["preview"]["interaction"]["type"] == "note"
     assert data["interaction_id"] in main.PENDING_INTERACTIONS
+
+
+def test_api_v1_ingest_text_aliases_note() -> None:
+    client = TestClient(main.app)
+    payload = {"text": "Reminder: Alex will share the timeline with Contoso."}
+
+    resp = client.post("/api/v1/ingest/text", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["preview_ready"] is True
+    assert data["interaction_id"] in main.PENDING_INTERACTIONS
+    assert data["preview"]["interaction"]["type"] == "note"
