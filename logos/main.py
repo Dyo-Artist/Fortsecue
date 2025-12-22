@@ -19,7 +19,7 @@ from .graphio.search import search_entities
 from .graphio.neo4j_client import GraphUnavailable, get_client, ping, run_query
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
 from .services.sync import build_graph_update_event, update_broadcaster
-from .workflows import RawInputBundle, run_pipeline
+from .workflows import InteractionMeta, RawInputBundle, run_pipeline
 
 app = FastAPI()
 templates = Jinja2Templates(
@@ -71,6 +71,7 @@ def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extr
         },
         "entities": extraction.get("entities", {}),
         "relationships": extraction.get("relationships", []),
+        "ready": True,
     }
     PENDING_INTERACTIONS[interaction_id] = preview
     return preview
@@ -80,9 +81,14 @@ def _persist_preview(interaction_id: str, interaction_meta: Dict[str, Any], extr
 async def ingest_doc(doc: Doc) -> dict[str, object]:
     """Ingest plain text documents and return an interaction id."""
     interaction_id = uuid4().hex
-    raw_bundle = RawInputBundle(
-        text=doc.text, source_uri=doc.source_uri, metadata={"type": "document"}
+    meta = InteractionMeta(
+        interaction_id=interaction_id,
+        interaction_type="document",
+        source_uri=doc.source_uri,
+        source_type="doc",
+        created_by="api",
     )
+    raw_bundle = RawInputBundle(meta=meta, raw_text=doc.text, metadata={"type": "document"})
     context = {
         "interaction_id": interaction_id,
         "interaction_type": "document",
@@ -96,9 +102,16 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
 @app.post("/ingest/note")
 async def ingest_note(note: Note) -> dict[str, object]:
     interaction_id = uuid4().hex
-    raw_bundle = RawInputBundle(
-        text=note.text,
+    meta = InteractionMeta(
+        interaction_id=interaction_id,
+        interaction_type="note",
         source_uri=note.source_uri or "",
+        source_type="text",
+        created_by="api",
+    )
+    raw_bundle = RawInputBundle(
+        meta=meta,
+        raw_text=note.text,
         metadata={"type": "note", "topic": note.topic} if note.topic else {"type": "note"},
     )
     context = {
@@ -193,9 +206,14 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
         raise HTTPException(status_code=502, detail="Transcription failed")
 
     interaction_id = uuid4().hex
-    raw_bundle = RawInputBundle(
-        text=text, source_uri=payload.source_uri, metadata={"type": "audio"}
+    meta = InteractionMeta(
+        interaction_id=interaction_id,
+        interaction_type="audio",
+        source_uri=payload.source_uri,
+        source_type="audio",
+        created_by="api",
     )
+    raw_bundle = RawInputBundle(meta=meta, raw_text=text, metadata={"type": "audio"})
     context = {
         "interaction_id": interaction_id,
         "interaction_type": "audio",

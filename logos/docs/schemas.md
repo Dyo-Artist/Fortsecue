@@ -1,0 +1,24 @@
+# Bundle schemas
+
+The LOGOS pipeline moves between short-term bundle payloads. The bundle models in
+`logos.models.bundles` formalise the contract for each stage while keeping
+flexibility for the evolving knowledgebase schema.
+
+- **RawInputBundle**: initial ingest payload that pairs `InteractionMeta` with
+  the raw text or file reference plus a content hash. Intended for short-term
+  memory only.
+- **ParsedContentBundle**: tokenised/parsed view of the input content, including
+  optional document structure and language hints.
+- **ExtractionBundle**: NLP output with entities (dynamic types from the
+  knowledgebase), relationships, and metrics such as sentiment. The raw
+  extraction dict is preserved for learning loops.
+- **ResolvedBundle**: entity/relationship resolution output with canonical or
+  provisional identifiers and action hints (`create|keep|link|ignore`).
+- **PreviewBundle**: UI-facing preview snapshot with interaction summary,
+  resolved/linked entities, and `ready=True` for downstream checks.
+- **UpsertBundle / ReasoningBundle / FeedbackBundle**: stubs reserved for graph
+  commits, reasoning traces, and human feedback. They keep the evolving schema
+  writable without hard-coding node/relationship types.
+
+Bundles carry `bundle_version` and `processing_version` to allow pipeline stages
+and API consumers to reason about compatibility and replay behaviour.
