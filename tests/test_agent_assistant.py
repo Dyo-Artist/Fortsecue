@@ -74,9 +74,10 @@ def test_summarise_interaction_records_assist_and_returns_summary():
         user_name="User Three",
         model_selector=lambda task: selection,
         record_assist_fn=_record,
+        memory_rules={"agent_context": {"fallback_summary_max_words": 3}},
     )
 
-    assert result["summary"].startswith("One two three")
+    assert len(result["summary"].split()) <= 3
     assert result["tier"] == "rule_only"
     assert calls[0]["user_id"] == "user_3"
 
@@ -103,7 +104,7 @@ def test_explain_risk_falls_back_on_model_error():
 
 
 def test_context_buffer_stores_recent_turns():
-    buffer = AgentContextBuffer(max_entries=2)
+    buffer = AgentContextBuffer(memory_rules={"agent_context": {"context_turn_limit": 2}})
 
     buffer.add_turn("user_a", "Hello?", "Hi there", metadata={"channel": "ui"})
     buffer.add_turn("user_b", "Status?", "All green")
@@ -119,7 +120,7 @@ def test_context_buffer_stores_recent_turns():
 
 
 def test_summarise_updates_context_buffer():
-    buffer = AgentContextBuffer()
+    buffer = AgentContextBuffer(memory_rules={"agent_context": {"context_turn_limit": 5}})
 
     selection = ModelSelection(task="summary_interaction", tier="rule_only", name="rule_engine", parameters={})
 

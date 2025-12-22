@@ -66,6 +66,34 @@ def load_memory_rules(path: Path | None = None) -> Dict[str, Any]:
     return dict(data)
 
 
+def update_memory_rules(updates: Mapping[str, Any], path: Path | None = None) -> Dict[str, Any]:
+    """Persist memory rule updates back to the knowledgebase.
+
+    The knowledgebase acts as the writable source of truth for evolving
+    memory behaviour. This helper merges partial updates into the current
+    rule set and writes the result to the configured YAML file.
+    """
+
+    if not isinstance(updates, Mapping):
+        raise MemoryConfigError("Memory rule updates must be a mapping")
+
+    target = path or MEMORY_RULES_PATH
+    existing = load_memory_rules(target)
+    merged: Dict[str, Any] = dict(existing)
+
+    for key, value in updates.items():
+        current = merged.get(key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[key] = {**current, **value}
+        else:
+            merged[key] = value
+
+    with target.open("w", encoding="utf-8") as file:
+        yaml.safe_dump(merged, file, sort_keys=False)
+
+    return merged
+
+
 def _section(rules: Mapping[str, Any], name: str) -> Dict[str, Any]:
     value = rules.get(name, {}) if isinstance(rules, Mapping) else {}
     if not isinstance(value, Mapping):
@@ -94,6 +122,7 @@ def _normalise_rules(rules: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
     mid_term = _section(rules, "mid_term")
     long_term = _section(rules, "long_term")
     consolidation = _section(rules, "consolidation")
+    agent_context = _section(rules, "agent_context")
 
     return {
         "short_term": {
@@ -118,7 +147,25 @@ def _normalise_rules(rules: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
             "promotion_batch_size": _coerce_int(consolidation.get("promotion_batch_size"), 0),
             "pin_user_flagged": bool(consolidation.get("pin_user_flagged", False)),
         },
+        "agent_context": {
+            "context_turn_limit": _coerce_int(agent_context.get("context_turn_limit"), 50) or 50,
+            "fallback_summary_max_words": _coerce_int(agent_context.get("fallback_summary_max_words"), 40) or 40,
+        },
     }
+
+
+def normalise_memory_rules(rules: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Expose rule normalisation for callers that need tier settings."""
+
+    return _normalise_rules(rules)
+
+
+def get_agent_context_rules(rules: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+    """Retrieve agent dialogue memory settings from knowledgebase rules."""
+
+    base_rules = rules or load_memory_rules()
+    normalised = normalise_memory_rules(base_rules)
+    return normalised.get("agent_context", {})
 
 
 class MemoryManager:
@@ -126,7 +173,7 @@ class MemoryManager:
 
     def __init__(self, rules: Mapping[str, Any] | None = None) -> None:
         loaded_rules = rules or load_memory_rules()
-        self._rules = _normalise_rules(loaded_rules)
+        self._rules = normalise_memory_rules(loaded_rules)
         self._short_term: Dict[str, Dict[str, MemoryItem]] = {}
         self._mid_term: Dict[str, MemoryItem] = {}
 
@@ -410,4 +457,7 @@ __all__ = [
     "MemoryItem",
     "MemoryManager",
     "load_memory_rules",
+    "normalise_memory_rules",
+    "get_agent_context_rules",
+    "update_memory_rules",
 ]
