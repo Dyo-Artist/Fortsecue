@@ -23,6 +23,7 @@ def test_ingest_doc_extracts_entities() -> None:
     response = asyncio.run(_run())
     assert response.status_code == 200
     data = response.json()
+    assert data["preview_ready"] is True
     preview = data["preview"]
     assert data["interaction_id"]
     assert preview["interaction"]["type"] == "document"

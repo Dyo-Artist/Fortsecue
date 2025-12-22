@@ -20,6 +20,7 @@ def test_ingest_note_success() -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert "interaction_id" in data
+    assert data["preview_ready"] is True
     preview = data["preview"]
     assert preview["interaction"]["type"] == "note"
     assert data["interaction_id"] in main.PENDING_INTERACTIONS
@@ -32,5 +33,6 @@ def test_ingest_note_minimal_payload() -> None:
     resp = client.post("/ingest/note", json=payload)
     assert resp.status_code == 200
     data = resp.json()
+    assert data["preview_ready"] is True
     assert data["preview"]["interaction"]["type"] == "note"
     assert data["interaction_id"] in main.PENDING_INTERACTIONS

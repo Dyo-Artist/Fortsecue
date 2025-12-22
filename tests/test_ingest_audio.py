@@ -25,6 +25,7 @@ def test_ingest_audio_success() -> None:
     response = asyncio.run(_run())
     assert response.status_code == 200
     data = response.json()
+    assert data["preview_ready"] is True
     assert data["preview"]["interaction"]["summary"] == "hello world"
     assert main.PENDING_INTERACTIONS[data["interaction_id"]] == data["preview"]
 
