@@ -12,14 +12,15 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from .core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
 from .graphio import graph_views
 from .graphio import search as search_module
 from .graphio.graph_views import ego_network, project_map
 from .graphio.search import search_entities
 from .graphio.neo4j_client import GraphUnavailable, get_client, ping, run_query
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
+from .models.bundles import InteractionMeta, RawInputBundle
 from .services.sync import build_graph_update_event, update_broadcaster
-from .workflows import InteractionMeta, RawInputBundle, run_pipeline
 
 app = FastAPI()
 templates = Jinja2Templates(
@@ -89,13 +90,17 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
         created_by="api",
     )
     raw_bundle = RawInputBundle(meta=meta, raw_text=doc.text, metadata={"type": "document"})
-    context = {
-        "interaction_id": interaction_id,
-        "interaction_type": "document",
-        "source_uri": doc.source_uri,
-        "persist_preview": _persist_preview,
-    }
-    preview = run_pipeline("ingest_preview", raw_bundle, context)
+    context = PipelineContext(
+        request_id=interaction_id,
+        user_id="api",
+        context_data={
+            "interaction_id": interaction_id,
+            "interaction_type": "document",
+            "source_uri": doc.source_uri,
+            "persist_preview": _persist_preview,
+        },
+    )
+    preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -114,13 +119,17 @@ async def ingest_note(note: Note) -> dict[str, object]:
         raw_text=note.text,
         metadata={"type": "note", "topic": note.topic} if note.topic else {"type": "note"},
     )
-    context = {
-        "interaction_id": interaction_id,
-        "interaction_type": "note",
-        "source_uri": note.source_uri or "",
-        "persist_preview": _persist_preview,
-    }
-    preview = run_pipeline("ingest_preview", raw_bundle, context)
+    context = PipelineContext(
+        request_id=interaction_id,
+        user_id="api",
+        context_data={
+            "interaction_id": interaction_id,
+            "interaction_type": "note",
+            "source_uri": note.source_uri or "",
+            "persist_preview": _persist_preview,
+        },
+    )
+    preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -214,13 +223,17 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
         created_by="api",
     )
     raw_bundle = RawInputBundle(meta=meta, raw_text=text, metadata={"type": "audio"})
-    context = {
-        "interaction_id": interaction_id,
-        "interaction_type": "audio",
-        "source_uri": payload.source_uri,
-        "persist_preview": _persist_preview,
-    }
-    preview = run_pipeline("ingest_preview", raw_bundle, context)
+    context = PipelineContext(
+        request_id=interaction_id,
+        user_id="api",
+        context_data={
+            "interaction_id": interaction_id,
+            "interaction_type": "audio",
+            "source_uri": payload.source_uri,
+            "persist_preview": _persist_preview,
+        },
+    )
+    preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     return {"interaction_id": interaction_id, "preview": preview}
 
 
@@ -231,20 +244,28 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="interaction not found")
 
     try:
-        context = {
-            "interaction_id": interaction_id,
-            "graph_client_factory": get_client,
-            "commit_time": datetime.now(timezone.utc),
-            "graph_update_builder": build_graph_update_event,
-        }
-        summary = run_pipeline("commit_interaction", preview, context)
+        context = PipelineContext(
+            request_id=interaction_id,
+            user_id="api",
+            context_data={
+                "interaction_id": interaction_id,
+                "graph_client_factory": get_client,
+                "commit_time": datetime.now(timezone.utc),
+                "graph_update_builder": build_graph_update_event,
+            },
+        )
+        summary = run_pipeline("pipeline.interaction_commit", preview, context)
+    except PipelineStageError as exc:
+        if isinstance(exc.cause, GraphUnavailable):
+            return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
+        raise
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     except Exception:
         logger.exception("Failed to commit interaction %s", interaction_id)
         raise HTTPException(status_code=500, detail="commit_failed")
 
-    graph_updates = context.get("graph_updates", [])
+    graph_updates = context.context_data.get("graph_updates", [])
     for update in graph_updates:
         try:
             await update_broadcaster.broadcast(update)
