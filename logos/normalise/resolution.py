@@ -797,6 +797,14 @@ def resolve_preview_from_graph(
     """Resolve entities in a preview payload using the graph as the source of truth."""
 
     try:
+        from logos.normalise.taxonomy import TaxonomyNormaliser
+    except Exception:
+        TaxonomyNormaliser = None  # type: ignore
+
+    if TaxonomyNormaliser:
+        preview = TaxonomyNormaliser(thresholds=_load_thresholds()).normalise_preview(preview)
+
+    try:
         client = client_factory()
     except GraphUnavailable:
         return dict(preview)

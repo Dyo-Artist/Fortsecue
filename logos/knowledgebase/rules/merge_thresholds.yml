@@ -14,6 +14,7 @@ defaults:
   document_similarity: 0.8
   location_similarity: 0.7
   ambiguity_gap: 0.1
+  concept_similarity: 0.75
 
 org:
   name_similarity: 0.85
