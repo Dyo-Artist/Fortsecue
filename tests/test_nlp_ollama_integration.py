@@ -33,20 +33,16 @@ def test_extract_all_uses_llm_when_configured(monkeypatch, configure_extraction_
 
     fake_json = json.dumps(
         {
+            "interaction_proposal": {
+                "summary": "From LLM",
+                "sentiment_score": -0.5,
+                "type": "note",
+            },
             "entities": {
                 "persons": [],
-            "orgs": [],
-            "projects": [],
-            "contracts": [],
-            "topics": [],
-            "commitments": [],
-            "issues": [],
-            "risks": [],
-        },
-        "relationships": [],
-        "sentiment": -0.5,
-        "summary": "From LLM",
-    }
+                "orgs": [],
+            },
+        }
     )
 
     def fake_call_llm(prompt: str) -> str:  # noqa: ARG001
@@ -65,19 +61,13 @@ def test_extract_all_handles_noisy_llm_json(monkeypatch, configure_extraction_ti
     configure_extraction_tier(tier="local_llm", fallback="rule_only")
 
     payload = {
+        "interaction_proposal": {
+            "summary": "From noisy LLM",
+            "sentiment_score": 0.25,
+        },
         "entities": {
             "persons": [],
-            "orgs": [],
-            "projects": [],
-            "contracts": [],
-            "topics": [],
-            "commitments": [],
-            "issues": [],
-            "risks": [],
         },
-        "relationships": [],
-        "sentiment": 0.25,
-        "summary": "From noisy LLM",
     }
 
     noisy_response = "Here is your JSON:\n" + json.dumps(payload) + "\nThank you!"
