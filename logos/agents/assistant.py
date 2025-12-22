@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Deque, Dict, List, Mapping, MutableMapping, Sequence
 
 from logos.graphio.upsert import (
     GraphNode,
@@ -15,6 +16,45 @@ from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.model_tiers import ModelConfigError, ModelSelection, get_model_for
 
 logger = logging.getLogger(__name__)
+
+
+class AgentContextBuffer:
+    """Ephemeral buffer to retain recent agent dialogue turns."""
+
+    def __init__(self, max_entries: int = 50) -> None:
+        self.max_entries = max_entries
+        self._turns: Deque[Dict[str, object]] = deque(maxlen=max_entries)
+
+    def add_turn(
+        self,
+        user_id: str,
+        query: str,
+        response: str,
+        *,
+        timestamp: datetime | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        """Append a dialogue turn, keeping only the most recent entries."""
+
+        entry: MutableMapping[str, object] = {
+            "timestamp": timestamp or datetime.now(timezone.utc),
+            "user_id": user_id,
+            "query": query,
+            "response": response,
+        }
+        if metadata:
+            entry["metadata"] = dict(metadata)
+        self._turns.append(entry)
+
+    def recent(self, *, limit: int | None = None, user_id: str | None = None) -> List[Dict[str, object]]:
+        """Return the most recent dialogue turns, optionally filtered by user."""
+
+        turns: Sequence[Dict[str, object]] = list(self._turns)
+        if user_id is not None:
+            turns = [turn for turn in turns if turn.get("user_id") == user_id]
+        if limit is not None:
+            return list(turns[-limit:])
+        return list(turns)
 
 
 def _select_model(task: str, resolver: Callable[[str], ModelSelection]) -> ModelSelection:
@@ -105,6 +145,7 @@ def summarise_interaction_for_user(
     agent_name: str = "LOGOS Assistant",
     model_selector: Callable[[str], ModelSelection] = get_model_for,
     record_assist_fn: Callable[..., None] = record_agent_assist,
+    context_buffer: AgentContextBuffer | None = None,
 ) -> dict:
     """Generate a summary and ensure the assisting agent is recorded."""
 
@@ -122,6 +163,14 @@ def summarise_interaction_for_user(
     except GraphUnavailable:
         logger.warning("Graph unavailable while recording agent assist for summary")
 
+    if context_buffer:
+        context_buffer.add_turn(
+            user_id,
+            text,
+            summary,
+            metadata={"agent_id": agent_id, "task": "summary_interaction", "model": selection.name},
+        )
+
     return {"summary": summary, "model": selection.name, "tier": selection.tier, "agent_id": agent_id}
 
 
@@ -134,6 +183,7 @@ def explain_risk_for_user(
     agent_name: str = "LOGOS Assistant",
     model_selector: Callable[[str], ModelSelection] = get_model_for,
     record_assist_fn: Callable[..., None] = record_agent_assist,
+    context_buffer: AgentContextBuffer | None = None,
 ) -> dict:
     """Explain a risk with rule-only fallback and agent provenance."""
 
@@ -151,6 +201,14 @@ def explain_risk_for_user(
     except GraphUnavailable:
         logger.warning("Graph unavailable while recording agent assist for risk explanation")
 
+    if context_buffer:
+        context_buffer.add_turn(
+            user_id,
+            risk_context,
+            explanation,
+            metadata={"agent_id": agent_id, "task": "reasoning_risk_explanation", "model": selection.name},
+        )
+
     return {
         "explanation": explanation,
         "model": selection.name,
@@ -158,6 +216,7 @@ def explain_risk_for_user(
         "agent_id": agent_id,
     }
 __all__ = [
+    "AgentContextBuffer",
     "record_agent_assist",
     "summarise_interaction_for_user",
     "explain_risk_for_user",
