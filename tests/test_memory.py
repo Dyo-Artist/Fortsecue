@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from logos.memory import MemoryManager, load_memory_rules
+from logos.memory import MemoryManager, load_memory_rules, update_memory_rules
 from logos.workflows import run_pipeline
 from logos.workflows.bundles import ExtractionBundle
 from logos.workflows.stages import build_preview_payload, capture_preview_memory, persist_session_memory
@@ -101,3 +101,25 @@ def test_session_memory_persists_to_knowledgebase(tmp_path: Path):
     assert kb_file.exists()
     data = yaml.safe_load(kb_file.read_text())
     assert data["sessions"]
+
+
+def test_memory_rules_can_be_updated_and_persisted(tmp_path: Path):
+    rules_path = tmp_path / "memory.yml"
+    rules_path.write_text(
+        """
+short_term:
+  default_ttl_seconds: 10
+agent_context:
+  context_turn_limit: 3
+        """
+    )
+
+    updated = update_memory_rules(
+        {"short_term": {"default_ttl_seconds": 20}, "agent_context": {"fallback_summary_max_words": 8}},
+        path=rules_path,
+    )
+
+    persisted = yaml.safe_load(rules_path.read_text())
+    assert persisted["short_term"]["default_ttl_seconds"] == 20
+    assert persisted["agent_context"]["context_turn_limit"] == 3
+    assert updated["agent_context"]["fallback_summary_max_words"] == 8

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from datetime import datetime, timezone
-from typing import Callable, Deque, Dict, List, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Deque, Dict, List, Mapping, MutableMapping, Sequence
 
 from logos.graphio.upsert import (
     GraphNode,
@@ -13,6 +13,7 @@ from logos.graphio.upsert import (
     upsert_relationship,
 )
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
+from logos.memory import get_agent_context_rules
 from logos.model_tiers import ModelConfigError, ModelSelection, get_model_for
 
 logger = logging.getLogger(__name__)
@@ -21,9 +22,16 @@ logger = logging.getLogger(__name__)
 class AgentContextBuffer:
     """Ephemeral buffer to retain recent agent dialogue turns."""
 
-    def __init__(self, max_entries: int = 50) -> None:
-        self.max_entries = max_entries
-        self._turns: Deque[Dict[str, object]] = deque(maxlen=max_entries)
+    def __init__(
+        self,
+        max_entries: int | None = None,
+        *,
+        memory_rules: Mapping[str, Any] | None = None,
+    ) -> None:
+        context_rules = get_agent_context_rules(memory_rules)
+        configured_limit = context_rules.get("context_turn_limit")
+        self.max_entries = max_entries if max_entries is not None else int(configured_limit or 50)
+        self._turns: Deque[Dict[str, object]] = deque(maxlen=self.max_entries)
 
     def add_turn(
         self,
@@ -67,7 +75,7 @@ def _select_model(task: str, resolver: Callable[[str], ModelSelection]) -> Model
         return ModelSelection(task=task, tier="rule_only", name="rule_engine", parameters={})
 
 
-def _rule_summary(text: str, *, max_words: int = 40) -> str:
+def _rule_summary(text: str, *, max_words: int) -> str:
     """Lightweight rule-based summary when LLM/ML tiers are unavailable."""
 
     tokens = text.split()
@@ -146,11 +154,13 @@ def summarise_interaction_for_user(
     model_selector: Callable[[str], ModelSelection] = get_model_for,
     record_assist_fn: Callable[..., None] = record_agent_assist,
     context_buffer: AgentContextBuffer | None = None,
+    memory_rules: Mapping[str, Any] | None = None,
 ) -> dict:
     """Generate a summary and ensure the assisting agent is recorded."""
 
     selection = _select_model("summary_interaction", model_selector)
-    summary = _rule_summary(text)
+    context_rules = get_agent_context_rules(memory_rules)
+    summary = _rule_summary(text, max_words=int(context_rules.get("fallback_summary_max_words", 40)))
 
     try:
         record_assist_fn(

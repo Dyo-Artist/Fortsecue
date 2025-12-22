@@ -33,3 +33,10 @@ consolidation:
   promotion_batch_size: 50
   # Whether to automatically pin critical justifications flagged by users.
   pin_user_flagged: true
+
+# Agent-facing context controls for conversational assistance and summaries.
+agent_context:
+  # Number of recent interactions to retain in the assistant's context buffer.
+  context_turn_limit: 50
+  # Word cap for rule-based summaries when ML/LLM tiers are unavailable.
+  fallback_summary_max_words: 40
