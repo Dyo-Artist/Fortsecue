@@ -24,16 +24,14 @@ def test_ensure_indexes_calls_expected_cypher(monkeypatch):
 
     neo4j_client.ensure_indexes()
 
-    expected_constraints = [
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Person) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Org) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Project) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Contract) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Commitment) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT IF NOT EXISTS FOR (n:Interaction) REQUIRE n.id IS UNIQUE",
-    ]
+    schema_store = neo4j_client.SchemaStore(mutable=False)
+    expected_labels = set(schema_store.node_types.keys())
 
     constraint_calls = [c[0] for c in dummy.calls if c[0].startswith("CREATE CONSTRAINT")]
-    for expected in expected_constraints:
-        assert expected in constraint_calls
-    assert any("logos_name_idx" in call[0] for call in dummy.calls)
+    assert expected_labels == {
+        call.split(":", maxsplit=1)[1].split(")", maxsplit=1)[0] for call in constraint_calls
+    }
+
+    name_index_labels = {label for label, definition in schema_store.node_types.items() if "name" in definition.properties}
+    if name_index_labels:
+        assert any("logos_name_idx" in call[0] for call in dummy.calls)

@@ -125,31 +125,25 @@ def ensure_indexes() -> None:
 
     try:
         schema_store = SchemaStore(mutable=False)
-        labels = list(schema_store.node_types.keys()) or [
-            "Person",
-            "Org",
-            "Project",
-            "Contract",
-            "Commitment",
-            "Interaction",
-        ]
-    except Exception:
-        labels = [
-            "Person",
-            "Org",
-            "Project",
-            "Contract",
-            "Commitment",
-            "Interaction",
-        ]
-    for label in labels:
+        node_types = schema_store.node_types
+    except Exception as exc:
+        logger.warning("Unable to load schema for index creation: %s", exc)
+        return
+
+    if not node_types:
+        logger.info("No node types defined; skipping index creation")
+        return
+
+    for label in node_types:
         client.run(
             "CREATE CONSTRAINT IF NOT EXISTS FOR (n:%s) REQUIRE n.id IS UNIQUE" % label,
             {},
         )
-    name_index_labels = [label for label in labels if label in {"Person", "Org", "Project", "Contract", "Commitment"}]
+    name_index_labels = [
+        label for label, definition in node_types.items() if "name" in definition.properties
+    ]
     if name_index_labels:
-        labels_literal = "','".join(name_index_labels)
+        labels_literal = "','".join(sorted(name_index_labels))
         client.run(
             "CALL db.index.fulltext.createNodeIndex('logos_name_idx', ['%s'], ['name'], { ifNotExists: true })"
             % labels_literal
