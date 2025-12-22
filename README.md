@@ -30,6 +30,13 @@ export NEO4J_PASSWORD="your-password"
 # export NEO4J_DATABASE="neo4j"
 ```
 
+## Configure staging path
+Staging artefacts (raw inputs, previews, and the staging index) are stored locally. Override the default location with `LOGOS_STAGING_DIR`:
+
+```bash
+export LOGOS_STAGING_DIR="$PWD/.logos/staging"
+```
+
 ## Configure model tiers
 Model selection is driven by `logos/knowledgebase/models/tiers.yml` and supports `rule_only`, `local_ml`, and `local_llm` per task. Update the YAML file to switch tiers; for example, set `extraction_interaction` to `local_llm` to use a local LLM for extraction. Optional Ollama settings remain environment-driven:
 
@@ -42,6 +49,30 @@ export OLLAMA_MODEL="gpt-oss:20b"
 ## Running the app
 ```bash
 uvicorn logos.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Developer smoke preview
+Run a lightweight ingest → preview check locally (defaults start a FastAPI instance on port 8000):
+
+```bash
+python scripts/dev_smoke_preview.py
+```
+
+Use `--no-start` if you already have the app running, and `--text` to try a different note:
+
+```bash
+python scripts/dev_smoke_preview.py --no-start --text "Maria will share the Q4 budget draft with the project team tomorrow."
+```
+
+Expected output:
+
+```
+Smoke test preview ready
+Interaction ID: <generated-id>
+Summary: <extracted summary or note text>
+Persons: <count>
+Organisations: <count>
+Commitments: <count>
 ```
 
 ## Using the app
