@@ -119,9 +119,11 @@ def _merge_concept(
     concept_id = node.concept_id
     if not concept_id:
         return
+    concept_label = schema_store.get_schema_convention("concept_label", "Concept")
+    instance_rel = schema_store.get_schema_convention("instance_of_relationship", "INSTANCE_OF")
     concept_node = GraphNode(
         id=concept_id,
-        label="Concept",
+        label=concept_label,
         properties={
             "name": concept_id,
             "kind": concept_kind or node.concept_kind or "DynamicConcept",
@@ -132,9 +134,9 @@ def _merge_concept(
     rel = GraphRelationship(
         src=node.id,
         dst=concept_id,
-        rel_type="INSTANCE_OF",
+        rel_type=instance_rel,
         src_label=node.label,
-        dst_label="Concept",
+        dst_label=concept_label,
         source_uri=node.source_uri,
     )
     upsert_relationship(tx, rel, rel.source_uri or "", now, schema_store=schema_store, user=user)

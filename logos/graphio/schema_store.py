@@ -141,6 +141,13 @@ class SchemaStore:
     def version(self) -> str | int:
         return self._version_info.get("version", 1)
 
+    def get_schema_convention(self, key: str, default: str | None = None) -> str | None:
+        conventions = self._rules.get("schema_conventions") if isinstance(self._rules.get("schema_conventions"), Mapping) else {}
+        value = conventions.get(key) if isinstance(conventions, Mapping) else None
+        if value is None:
+            return default
+        return str(value)
+
     def _load_node_types(self) -> dict[str, NodeTypeDefinition]:
         raw = _load_yaml(self._node_types_path)
         entries = raw.get("node_types") if isinstance(raw.get("node_types"), Mapping) else raw

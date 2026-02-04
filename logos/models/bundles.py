@@ -180,7 +180,11 @@ class ExtractionBundle(PipelineBundle):
 
 
 class ResolvedBundle(PipelineBundle):
-    """Entity/relationship resolution output."""
+    """Entity/relationship resolution output.
+
+    Resolution emits canonical ids, candidate matches, and confidence signals.
+    Preview workflows typically map this state into PreviewBundle for UI edits.
+    """
 
     meta: InteractionMeta
     resolved_entities: Dict[str, List[EntityMention]] = Field(default_factory=dict)
@@ -195,7 +199,11 @@ class PreviewEntity(EntityMention):
 
 
 class PreviewBundle(PipelineBundle):
-    """Preview payload returned to clients."""
+    """Preview payload returned to clients.
+
+    This bundle carries the resolved, editable snapshot presented to users
+    before commit, so it effectively serves as the resolved bundle in review.
+    """
 
     meta: InteractionMeta
     interaction: InteractionSnapshot
@@ -213,7 +221,11 @@ class PreviewBundle(PipelineBundle):
 
 
 class UpsertBundle(PipelineBundle):
-    """Placeholder for graph upsert payloads."""
+    """Graph-ready payloads for commit.
+
+    Upsert bundles must be fully materialised: all nodes have stable ids and
+    relationships reference those ids directly for idempotent MERGE upserts.
+    """
 
     meta: InteractionMeta
     nodes: List[Mapping[str, Any]] = Field(default_factory=list)
