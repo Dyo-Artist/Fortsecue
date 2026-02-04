@@ -6,7 +6,9 @@ from typing import Any, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from logos.graphio.neo4j_client import get_client
 from logos.graphio.schema_store import SchemaStore
+from logos.models.bundles import UpsertBundle
 
 LABEL_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 REL_TYPE_PATTERN = re.compile(r"^[A-Z0-9_]+$")
@@ -112,6 +114,7 @@ def _merge_concept(
     now: datetime,
     *,
     schema_store: SchemaStore,
+    user: str | None,
 ) -> None:
     concept_id = node.concept_id
     if not concept_id:
@@ -125,7 +128,7 @@ def _merge_concept(
         },
         source_uri=node.source_uri,
     )
-    upsert_node(tx, concept_node, now, schema_store=schema_store)
+    upsert_node(tx, concept_node, now, schema_store=schema_store, user=user)
     rel = GraphRelationship(
         src=node.id,
         dst=concept_id,
@@ -134,10 +137,17 @@ def _merge_concept(
         dst_label="Concept",
         source_uri=node.source_uri,
     )
-    upsert_relationship(tx, rel, rel.source_uri or "", now, schema_store=schema_store)
+    upsert_relationship(tx, rel, rel.source_uri or "", now, schema_store=schema_store, user=user)
 
 
-def upsert_node(tx, node: GraphNode, now: datetime, *, schema_store: SchemaStore = SCHEMA_STORE) -> None:
+def upsert_node(
+    tx,
+    node: GraphNode,
+    now: datetime,
+    *,
+    schema_store: SchemaStore = SCHEMA_STORE,
+    user: str | None = "system",
+) -> None:
     label = _ensure_valid_label(node.label)
     props = _clean_properties(node.properties)
     schema_props = set(props.keys()) | {"source_uri"}
@@ -152,6 +162,8 @@ def upsert_node(tx, node: GraphNode, now: datetime, *, schema_store: SchemaStore
         "n.updated_at = datetime($now), n.last_seen_at = datetime($now), "
         "n.created_at = coalesce(n.created_at, datetime($now)), n.first_seen_at = coalesce(n.first_seen_at, datetime($now))"
     )
+    if user:
+        cypher = f"{cypher}, n.created_by = coalesce(n.created_by, $user), n.updated_by = $user"
     tx.run(
         cypher,
         {
@@ -159,9 +171,10 @@ def upsert_node(tx, node: GraphNode, now: datetime, *, schema_store: SchemaStore
             "props": props,
             "source_uri": node.source_uri,
             "now": _dt_param(now),
+            "user": user,
         },
     )
-    _merge_concept(tx, node, node.concept_kind, now, schema_store=schema_store)
+    _merge_concept(tx, node, node.concept_kind, now, schema_store=schema_store, user=user)
 
 
 def _labelled_node(var: str, label: str | None) -> str:
@@ -178,6 +191,7 @@ def upsert_relationship(
     now: datetime,
     *,
     schema_store: SchemaStore = SCHEMA_STORE,
+    user: str | None = "system",
 ) -> None:
     rel_type = _ensure_valid_rel_type(rel.rel_type)
     if not source_uri:
@@ -195,12 +209,15 @@ def upsert_relationship(
         "r.updated_at = datetime($now), r.last_seen_at = datetime($now), "
         "r.created_at = coalesce(r.created_at, datetime($now)), r.first_seen_at = coalesce(r.first_seen_at, datetime($now))"
     )
+    if user:
+        cypher = f"{cypher}, r.created_by = coalesce(r.created_by, $user), r.updated_by = $user"
     params: dict[str, Any] = {
         "src": rel.src,
         "dst": rel.dst,
         "props": props,
         "source_uri": source_uri,
         "now": _dt_param(now),
+        "user": user,
     }
     tx.run(cypher, params)
 
@@ -211,16 +228,59 @@ def upsert_interaction_bundle(
     now: datetime,
     *,
     schema_store: SchemaStore = SCHEMA_STORE,
+    user: str | None = "system",
 ) -> None:
     source_uri = bundle.interaction.source_uri or f"interaction://{bundle.interaction.id}"
     bundle.interaction.source_uri = source_uri
     for node in bundle.all_nodes:
         node.source_uri = node.source_uri or source_uri
-        upsert_node(tx, node, now, schema_store=schema_store)
+        upsert_node(tx, node, now, schema_store=schema_store, user=user)
 
     for rel in bundle.relationships:
         rel.source_uri = rel.source_uri or source_uri
-        upsert_relationship(tx, rel, rel.source_uri, now, schema_store=schema_store)
+        upsert_relationship(tx, rel, rel.source_uri, now, schema_store=schema_store, user=user)
+
+
+def _resolve_bundle_user(bundle: UpsertBundle, user: str | None) -> str | None:
+    if user:
+        return user
+    return bundle.meta.created_by or "system"
+
+
+def _commit_bundle_tx(
+    tx,
+    bundle: UpsertBundle,
+    now: datetime,
+    *,
+    user: str | None,
+    schema_store: SchemaStore,
+) -> None:
+    source_uri = bundle.meta.source_uri or f"interaction://{bundle.meta.interaction_id}"
+    for node_data in bundle.nodes:
+        node = GraphNode.model_validate(node_data)
+        node.source_uri = node.source_uri or source_uri
+        upsert_node(tx, node, now, schema_store=schema_store, user=user)
+    for rel_data in bundle.relationships:
+        rel = GraphRelationship.model_validate(rel_data)
+        rel_source = rel.source_uri or rel_data.get("source_uri") or source_uri
+        upsert_relationship(tx, rel, rel_source, now, schema_store=schema_store, user=user)
+
+
+def commit_upsert_bundle(bundle: UpsertBundle, user: str | None = "system") -> dict[str, Any]:
+    now = datetime.now(timezone.utc)
+    schema_store = SCHEMA_STORE
+    resolved_user = _resolve_bundle_user(bundle, user)
+    client = get_client()
+
+    def _tx(tx):
+        _commit_bundle_tx(tx, bundle, now, user=resolved_user, schema_store=schema_store)
+
+    client.run_in_tx(_tx)
+    return {
+        "interaction_id": bundle.meta.interaction_id,
+        "nodes_committed": len(bundle.nodes),
+        "relationships_committed": len(bundle.relationships),
+    }
 
 
 __all__ = [
@@ -230,5 +290,6 @@ __all__ = [
     "upsert_node",
     "upsert_relationship",
     "upsert_interaction_bundle",
+    "commit_upsert_bundle",
     "SCHEMA_STORE",
 ]
