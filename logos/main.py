@@ -271,7 +271,60 @@ async def get_interaction_preview(interaction_id: str) -> dict[str, object]:
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="preview_not_found") from None
 
-    return preview.model_dump()
+    return preview.model_dump(mode="json")
+
+
+@app.post("/api/v1/interactions/{interaction_id}/commit")
+async def commit_interaction_api(
+    interaction_id: str, edited_preview: PreviewBundle
+) -> dict[str, object]:
+    if edited_preview.meta.interaction_id != interaction_id:
+        raise HTTPException(status_code=400, detail="interaction_id_mismatch")
+
+    try:
+        STAGING_STORE.get_preview(interaction_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="preview_not_found") from None
+
+    STAGING_STORE.save_preview(interaction_id, edited_preview)
+
+    context = PipelineContext(
+        request_id=interaction_id,
+        user_id="api",
+        context_data={
+            "interaction_id": interaction_id,
+            "graph_client_factory": get_client,
+            "commit_time": datetime.now(timezone.utc),
+            "graph_update_builder": build_graph_update_event,
+        },
+    )
+    try:
+        summary = run_pipeline("pipeline.interaction_commit", edited_preview, context)
+    except PipelineStageError as exc:
+        if isinstance(exc.cause, GraphUnavailable):
+            STAGING_STORE.set_state(interaction_id, "failed", error_message="neo4j_unavailable")
+            raise HTTPException(status_code=503, detail="neo4j_unavailable") from None
+        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        logger.exception("commit_failed", extra={"interaction_id": interaction_id})
+        raise HTTPException(status_code=500, detail="commit_failed") from None
+    except GraphUnavailable:
+        STAGING_STORE.set_state(interaction_id, "failed", error_message="neo4j_unavailable")
+        raise HTTPException(status_code=503, detail="neo4j_unavailable") from None
+    except Exception:
+        STAGING_STORE.set_state(interaction_id, "failed", error_message="commit_failed")
+        logger.exception("commit_failed", extra={"interaction_id": interaction_id})
+        raise HTTPException(status_code=500, detail="commit_failed") from None
+
+    graph_updates = context.context_data.get("graph_updates", [])
+    for update in graph_updates:
+        try:
+            await update_broadcaster.broadcast(update)
+        except Exception:  # pragma: no cover - avoid failing commit responses
+            logger.exception("Failed to broadcast graph update for interaction %s", interaction_id)
+
+    STAGING_STORE.set_state(interaction_id, "committed")
+    PENDING_INTERACTIONS.pop(interaction_id, None)
+    return summary
 
 
 @app.get("/api/v1/interactions/{interaction_id}/status")
