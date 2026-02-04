@@ -167,3 +167,26 @@ def test_upsert_interaction_bundle_defaults_missing_source(tmp_path):
     assert node_call["source_uri"] == default_source_uri
     rel_call = next(call[1] for call in tx.calls if "MERGE (src)-[r" in call[0])
     assert rel_call["source_uri"] == default_source_uri
+
+
+def test_upsert_provenance_user_fields(tmp_path):
+    tx = FakeTx()
+    now = datetime(2024, 5, 1, tzinfo=timezone.utc)
+    store = _temp_schema(tmp_path)
+    node = GraphNode(
+        id="a1",
+        label="Person",
+        properties={"name": "Sam"},
+        source_uri="source://user",
+    )
+    rel = GraphRelationship(src="a1", dst="b1", rel="RELATES_TO")
+
+    upsert_node(tx, node, now, schema_store=store, user="tester")
+    upsert_relationship(tx, rel, "source://user", now, schema_store=store, user="tester")
+
+    node_cypher, node_params = tx.calls[0]
+    rel_cypher, rel_params = tx.calls[1]
+    assert "created_by" in node_cypher
+    assert node_params["user"] == "tester"
+    assert "updated_by" in rel_cypher
+    assert rel_params["user"] == "tester"
