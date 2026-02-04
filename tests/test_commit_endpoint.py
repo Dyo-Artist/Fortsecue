@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from logos import main
 from logos.graphio.schema_store import SchemaStore
 from logos.workflows import stages
+from logos.models.bundles import InteractionMeta, PreviewBundle
+from logos.staging.store import LocalStagingStore
 
 
 class DummyTx:
@@ -109,3 +111,56 @@ def test_commit_broadcasts_updates(monkeypatch):
     assert message["type"] == "graph_update"
     assert message["interaction_id"] == "i1"
     assert message["summary"]["persons"] == 1
+
+
+def test_commit_api_endpoint_accepts_preview_bundle(monkeypatch, tmp_path):
+    client = TestClient(main.app)
+    dummy_client = DummyClient()
+    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    tmp_schema = SchemaStore(
+        tmp_path / "node_types.yml",
+        tmp_path / "relationship_types.yml",
+        tmp_path / "rules.yml",
+        tmp_path / "version.yml",
+    )
+    monkeypatch.setattr(stages, "SCHEMA_STORE", tmp_schema)
+    staging_store = LocalStagingStore(tmp_path / "staging")
+    monkeypatch.setattr(main, "STAGING_STORE", staging_store)
+
+    meta = InteractionMeta(
+        interaction_id="i2",
+        interaction_type="email",
+        source_uri="file://email",
+        source_type="text",
+        created_by="api",
+    )
+    staging_store.create_interaction(meta)
+    preview_bundle = PreviewBundle(
+        meta=meta,
+        interaction={
+            "id": "i2",
+            "type": "email",
+            "at": datetime(2024, 1, 1, tzinfo=timezone.utc).isoformat(),
+            "sentiment": 0.0,
+            "summary": "hello",
+            "source_uri": "uri",
+        },
+        entities={
+            "orgs": [{"id": "org1", "name": "Acme"}],
+            "persons": [{"id": "p1", "name": "Alice", "org_id": "org1"}],
+        },
+        relationships=[{"src": "i2", "dst": "p1", "rel": "MENTIONS"}],
+    )
+    staging_store.save_preview(meta.interaction_id, preview_bundle)
+    staging_store.set_state(meta.interaction_id, "preview_ready")
+
+    response = client.post(
+        "/api/v1/interactions/i2/commit",
+        json=preview_bundle.model_dump(mode="json"),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["interaction_id"] == "i2"
+    assert staging_store.get_state("i2").state == "committed"
+    assert any("MENTIONS" in cypher for cypher, _ in dummy_client.tx.calls)
