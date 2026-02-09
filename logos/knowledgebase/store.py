@@ -474,6 +474,59 @@ class KnowledgebaseStore:
 
         return updates
 
+    def update_merge_thresholds(
+        self,
+        updates: Mapping[str, float],
+        *,
+        scope: str = "defaults",
+        reason: str | None = None,
+        min_value: float = 0.0,
+        max_value: float = 1.0,
+    ) -> dict[str, float]:
+        """Update merge thresholds within the rules store and log versioning."""
+
+        path = self.base_path / "rules" / "merge_thresholds.yml"
+        applied: dict[str, float] = {}
+
+        with self._file_lock(path):
+            data = self._load_yaml(path)
+            if not isinstance(data, dict):
+                data = {}
+
+            scope_mapping = data.get(scope)
+            if not isinstance(scope_mapping, Mapping):
+                scope_mapping = {}
+
+            scope_values = dict(scope_mapping)
+            for key, delta in updates.items():
+                current = scope_values.get(key)
+                if not isinstance(current, (int, float)):
+                    continue
+                new_value = float(current) + float(delta)
+                clamped = min(max(new_value, min_value), max_value)
+                scope_values[key] = round(clamped, 4)
+                applied[str(key)] = scope_values[key]
+
+            if not applied:
+                return {}
+
+            data[scope] = scope_values
+            metadata = self._ensure_metadata(data)
+            new_version = self._bump_version(metadata.get("version"))
+            timestamp = _utc_now()
+            metadata.update({"version": new_version, "updated_at": timestamp, "updated_by": self.actor})
+            data["metadata"] = metadata
+
+            self._write_yaml(path, data, lock=False)
+
+        self._append_changelog(
+            path=path,
+            change=reason or "Updated merge thresholds",
+            version=new_version,
+            details={"scope": scope, "updates": applied},
+        )
+        return applied
+
     def learn_from_extraction(self, extraction: Mapping[str, Any] | None, *, source_uri: str | None = None) -> dict[str, list[str]]:
         if extraction is None:
             return {
