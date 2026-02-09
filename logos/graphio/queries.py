@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from math import ceil
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -41,6 +42,95 @@ def _relationship_types_by_keywords(
         if any(keyword in lowered_rel for keyword in keywords)
     ]
     return matches
+
+
+def _reasoning_relationship_types() -> list[str]:
+    rel_types = list(_schema_store().relationship_types.keys())
+    keywords = [
+        "mention",
+        "made",
+        "request",
+        "relates",
+        "related",
+        "influence",
+        "raised",
+        "identified",
+        "result",
+        "associate",
+        "participated",
+        "involved",
+        "party",
+        "work",
+        "assist",
+    ]
+    return _relationship_types_by_keywords(rel_types, keywords)
+
+
+def _edge_weight(rel_type: str) -> float:
+    lowered = rel_type.lower()
+    if "influence" in lowered:
+        return 1.6
+    if "made" in lowered or "requested" in lowered:
+        return 1.4
+    if "relates" in lowered or "related" in lowered:
+        return 1.25
+    if "mention" in lowered:
+        return 1.15
+    if "identified" in lowered or "raised" in lowered:
+        return 1.1
+    if "involved" in lowered or "participated" in lowered:
+        return 1.0
+    if "works_for" in lowered or "party" in lowered or "assist" in lowered:
+        return 0.95
+    return 0.9
+
+
+def _extract_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=timezone.utc)
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds > 1e12:
+            seconds = seconds / 1000.0
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if normalized.endswith("Z"):
+            normalized = normalized[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(normalized)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _recency_factor(rel_props: Mapping[str, Any]) -> float:
+    for key in (
+        "at",
+        "interaction_at",
+        "occurred_at",
+        "created_at",
+        "timestamp",
+        "last_seen_at",
+        "updated_at",
+    ):
+        if key in rel_props:
+            timestamp = _extract_timestamp(rel_props.get(key))
+            break
+    else:
+        timestamp = None
+    if timestamp is None:
+        return 0.5
+    now = datetime.now(timezone.utc)
+    delta_days = max((now - timestamp).total_seconds() / 86400.0, 0.0)
+    return 1.0 / (1.0 + delta_days)
 
 
 def _property_candidates(keyword: str) -> list[str]:
@@ -324,6 +414,99 @@ def list_alerts(
     rows = list(run_query(items_query, params))
     alerts = [row["alert"] for row in rows]
     return alerts, total
+
+
+def get_reasoning_paths(
+    *,
+    stakeholder_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = 3,
+    max_hops: int = 4,
+) -> list[dict[str, Any]]:
+    if not stakeholder_id and not project_id:
+        raise ValueError("Provide stakeholder_id or project_id for reasoning paths.")
+    start_id = stakeholder_id or project_id
+    target_id = project_id if stakeholder_id and project_id else None
+    label_groups = schema_label_groups()
+    target_labels: list[str] = []
+    if target_id is None:
+        target_labels = sorted(
+            {
+                *label_groups.get("risk", []),
+                *label_groups.get("issue", []),
+                *label_groups.get("commitment", []),
+                *label_groups.get("project", []),
+                *label_groups.get("contract", []),
+                *label_groups.get("topic", []),
+                *label_groups.get("person", []),
+                *label_groups.get("org", []),
+            }
+        )
+    rel_types = _reasoning_relationship_types()
+    if not rel_types:
+        return []
+    candidate_limit = max(limit * 5, 10)
+    query = (
+        "MATCH (start {id: $start_id}) "
+        "OPTIONAL MATCH (target {id: $target_id}) "
+        "WITH start, target "
+        "MATCH p = (start)-[rels*1..$max_hops]-(end) "
+        "WHERE all(rel IN rels WHERE type(rel) IN $rel_types) "
+        "AND ("
+        "  ($target_id IS NULL AND (size($target_labels) = 0 "
+        "    OR any(label IN labels(end) WHERE label IN $target_labels))) "
+        "  OR ($target_id IS NOT NULL AND end = target)"
+        ") "
+        "RETURN "
+        "[node IN nodes(p) | node{.*, labels: labels(node)}] AS nodes, "
+        "[rel IN relationships(p) | "
+        "{src: startNode(rel).id, dst: endNode(rel).id, rel: type(rel), props: properties(rel)}"
+        "] AS edges "
+        "LIMIT $candidate_limit"
+    )
+    rows = list(
+        run_query(
+            query,
+            {
+                "start_id": start_id,
+                "target_id": target_id,
+                "target_labels": target_labels,
+                "rel_types": rel_types,
+                "max_hops": max_hops,
+                "candidate_limit": candidate_limit,
+            },
+        )
+    )
+    scored: list[dict[str, Any]] = []
+    for row in rows:
+        edges = row.get("edges", []) or []
+        score = 0.0
+        recency_scores: list[float] = []
+        rel_summary: list[str] = []
+        for edge in edges:
+            rel_type = str(edge.get("rel") or "")
+            props = edge.get("props") or {}
+            weight = _edge_weight(rel_type)
+            recency = _recency_factor(props)
+            score += weight * recency
+            recency_scores.append(recency)
+            if rel_type:
+                rel_summary.append(rel_type)
+        average_recency = sum(recency_scores) / len(recency_scores) if recency_scores else 0.0
+        explanation = (
+            f"Path score {score:.2f} from edges [{', '.join(rel_summary)}] "
+            f"with average recency {average_recency:.2f}."
+        )
+        scored.append(
+            {
+                "nodes": row.get("nodes", []),
+                "edges": edges,
+                "score": score,
+                "explanation": explanation,
+            }
+        )
+    scored.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+    return scored[: max(limit, 0)]
 
 
 def get_ego_graph(entity_id: str) -> dict[str, list[dict[str, Any]]]:
