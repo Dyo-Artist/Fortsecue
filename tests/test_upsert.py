@@ -11,10 +11,12 @@ from logos.graphio.upsert import (
     GraphNode,
     GraphRelationship,
     InteractionBundle,
+    commit_upsert_bundle,
     upsert_interaction_bundle,
     upsert_node,
     upsert_relationship,
 )
+from logos.models.bundles import InteractionMeta, UpsertBundle
 
 
 class FakeTx:
@@ -24,6 +26,14 @@ class FakeTx:
     def run(self, cypher: str, params: dict | None = None):
         self.calls.append((cypher, params or {}))
         return []
+
+
+class FakeClient:
+    def __init__(self, tx: FakeTx) -> None:
+        self.tx = tx
+
+    def run_in_tx(self, fn):
+        return fn(self.tx)
 
 
 def _temp_schema(tmp_path, node_types_payload: str | None = None) -> SchemaStore:
@@ -222,3 +232,37 @@ def test_upsert_provenance_user_fields(tmp_path):
     assert node_params["user"] == "tester"
     assert "updated_by" in rel_cypher
     assert rel_params["user"] == "tester"
+
+
+def test_commit_upsert_bundle_materialises_dialectical_lines(monkeypatch, tmp_path):
+    tx = FakeTx()
+    store = _temp_schema(tmp_path)
+    client = FakeClient(tx)
+    monkeypatch.setattr("logos.graphio.upsert.SCHEMA_STORE", store)
+    monkeypatch.setattr("logos.graphio.upsert.get_client", lambda: client)
+
+    meta = InteractionMeta(
+        interaction_id="i-9",
+        interaction_type="note",
+        interaction_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+        source_uri="file://dialectic",
+        source_type="text",
+        created_by="tester",
+        received_at=datetime(2024, 6, 1, tzinfo=timezone.utc),
+    )
+    bundle = UpsertBundle(
+        meta=meta,
+        nodes=[
+            {"id": "issue-1", "label": "Issue", "properties": {"name": "Budget"}},
+            {"id": "risk-1", "label": "Risk", "properties": {"name": "Overrun"}},
+        ],
+        dialectical_lines=[GraphRelationship(src="issue-1", dst="risk-1", rel="RELATED_TO")],
+    )
+
+    result = commit_upsert_bundle(bundle, user="tester")
+
+    rel_call = next(
+        params for cypher, params in tx.calls if "MERGE (src)-[r:RELATED_TO]->(dst)" in cypher
+    )
+    assert rel_call["source_uri"] == "file://dialectic"
+    assert result["dialectical_lines_committed"] == 1

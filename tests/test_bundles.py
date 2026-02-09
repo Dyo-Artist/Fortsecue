@@ -1,9 +1,14 @@
 import json
+import pathlib
+import sys
 from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
 
+sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
+
+from logos.graphio.types import GraphRelationship
 from logos.models.bundles import (
     EntityMention,
     InteractionMeta,
@@ -12,6 +17,7 @@ from logos.models.bundles import (
     PreviewBundle,
     PreviewEntity,
     RawInputBundle,
+    ResolvedBundle,
 )
 
 
@@ -80,3 +86,12 @@ def test_entity_action_literal():
     assert entity.action == "create"
     with pytest.raises(ValidationError):
         EntityMention(temp_id="t2", action="unknown")
+
+
+def test_resolved_bundle_accepts_dialectical_lines():
+    bundle = ResolvedBundle(
+        meta=_meta("file://dialectic"),
+        dialectical_lines=[GraphRelationship(src="a1", dst="b1", rel="RELATED_TO")],
+    )
+
+    assert bundle.dialectical_lines[0].rel == "RELATED_TO"
