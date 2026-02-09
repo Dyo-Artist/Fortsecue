@@ -1,0 +1,27 @@
+alerts:
+  unresolved_commitment:
+    description: "Commitment older than N days and not done/cancelled."
+    enabled: true
+    params:
+      status_excluded:
+        - done
+        - cancelled
+      age_days:
+        initial: 7
+        min: 3
+        max: 30
+        learning: "feedback_regression"
+  sentiment_drop:
+    description: "Three or more negative interactions within a rolling window."
+    enabled: true
+    params:
+      window_days:
+        initial: 14
+        min: 7
+        max: 60
+        learning: "manual"
+      min_negative_count:
+        initial: 3
+        min: 2
+        max: 10
+        learning: "feedback_regression"

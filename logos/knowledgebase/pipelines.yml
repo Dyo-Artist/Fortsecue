@@ -17,3 +17,10 @@ pipeline.interaction_commit:
     - graph.upsert
     - alerts.evaluate
     - learn.capture_feedback
+
+pipeline.reasoning_alerts:
+  stages:
+    - R1_COLLECT_TARGETS
+    - R2_COMPUTE_SCORES
+    - R3_APPLY_RULES_AND_MODELS
+    - R4_MATERIALISE_ALERTS
