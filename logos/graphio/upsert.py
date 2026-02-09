@@ -198,6 +198,24 @@ def upsert_interaction_bundle(
         upsert_relationship(tx, rel, rel.source_uri, now, schema_store=schema_store, user=user)
 
 
+def upsert_agent_assist(
+    tx,
+    agent: GraphNode,
+    person: GraphNode,
+    assists_rel: GraphRelationship,
+    now: datetime,
+    *,
+    schema_store: SchemaStore = SCHEMA_STORE,
+    user: str | None = "system",
+) -> None:
+    agent.source_uri = agent.source_uri or "agent://init"
+    person.source_uri = person.source_uri or agent.source_uri
+    assists_rel.source_uri = assists_rel.source_uri or agent.source_uri
+    upsert_node(tx, agent, now, schema_store=schema_store, user=user)
+    upsert_node(tx, person, now, schema_store=schema_store, user=user)
+    upsert_relationship(tx, assists_rel, assists_rel.source_uri, now, schema_store=schema_store, user=user)
+
+
 def _resolve_bundle_user(bundle: UpsertBundle, user: str | None) -> str | None:
     if user:
         return user
@@ -252,6 +270,7 @@ __all__ = [
     "upsert_node",
     "upsert_relationship",
     "upsert_interaction_bundle",
+    "upsert_agent_assist",
     "commit_upsert_bundle",
     "SCHEMA_STORE",
 ]
