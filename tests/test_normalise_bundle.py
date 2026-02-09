@@ -56,3 +56,17 @@ def test_reasoning_relationships_follow_schema(tmp_path, request):
     reasoning_rels = [rel for rel in interaction_bundle.relationships if rel.src == "p1"]
     assert reasoning_rels
     assert reasoning_rels[0].rel == "INFLUENCES"
+
+
+def test_build_agent_bundle_defaults():
+    agent, person, assists_rel = bundle.build_agent_bundle("user_1", person_name="User One")
+
+    assert agent.id == "agent_user_1"
+    assert agent.properties["name"] == "LOGOS Assistant for User One"
+    assert agent.properties["created_by"] == "user_1"
+    assert agent.source_uri == "agent://init"
+    assert person.id == "user_1"
+    assert person.properties["name"] == "User One"
+    assert assists_rel.rel == "ASSISTS"
+    assert assists_rel.src == agent.id
+    assert assists_rel.dst == person.id

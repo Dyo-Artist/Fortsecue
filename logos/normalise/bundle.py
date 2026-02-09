@@ -339,3 +339,44 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
     ] + inferred_relationships + reasoning_relationships
 
     return InteractionBundle(interaction=interaction, nodes=nodes, relationships=relationships)
+
+
+def build_agent_bundle(
+    person_id: str,
+    *,
+    person_name: str | None = None,
+    agent_id: str | None = None,
+    agent_name: str | None = None,
+    created_by: str | None = None,
+    source_uri: str | None = None,
+) -> tuple[GraphNode, GraphNode, GraphRelationship]:
+    resolved_person_id = str(person_id)
+    resolved_person_name = person_name or resolved_person_id
+    resolved_agent_id = agent_id or f"agent_{resolved_person_id}"
+    resolved_agent_name = agent_name or f"LOGOS Assistant for {resolved_person_name}"
+    resolved_source = source_uri or "agent://init"
+    resolved_creator = created_by or resolved_person_id
+
+    agent = GraphNode(
+        id=resolved_agent_id,
+        label="Agent",
+        properties={"name": resolved_agent_name, "created_by": resolved_creator},
+        concept_kind="AgentProfile",
+        source_uri=resolved_source,
+    )
+    person = GraphNode(
+        id=resolved_person_id,
+        label="Person",
+        properties={"name": resolved_person_name},
+        concept_kind="StakeholderType",
+        source_uri=resolved_source,
+    )
+    assists_rel = GraphRelationship(
+        src=resolved_agent_id,
+        dst=resolved_person_id,
+        rel="ASSISTS",
+        src_label="Agent",
+        dst_label="Person",
+        source_uri=resolved_source,
+    )
+    return agent, person, assists_rel

@@ -5,16 +5,11 @@ from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Callable, Deque, Dict, List, Mapping, MutableMapping, Sequence
 
-from logos.graphio.upsert import (
-    GraphNode,
-    GraphRelationship,
-    SCHEMA_STORE,
-    upsert_node,
-    upsert_relationship,
-)
+from logos.graphio.upsert import SCHEMA_STORE, upsert_agent_assist
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.memory import get_agent_context_rules
 from logos.model_tiers import ModelConfigError, ModelSelection, get_model_for
+from logos.normalise.bundle import build_agent_bundle
 
 logger = logging.getLogger(__name__)
 
@@ -112,34 +107,19 @@ def record_agent_assist(
     client = client_factory()
     store = schema_store or SCHEMA_STORE
 
-    agent = GraphNode(
-        id=agent_id,
-        label="Agent",
-        properties={"name": agent_name, "role": agent_role, "created_by": actor_id, "updated_by": actor_id},
-        concept_kind="AgentProfile",
+    agent, user, assists_rel = build_agent_bundle(
+        user_id,
+        person_name=user_name,
+        agent_id=agent_id,
+        agent_name=agent_name,
+        created_by=actor_id,
         source_uri=source_uri,
     )
-    user = GraphNode(
-        id=user_id,
-        label="Person",
-        properties={"name": user_name or user_id},
-        concept_kind="StakeholderType",
-        source_uri=source_uri,
-    )
-    assists_rel = GraphRelationship(
-        src=agent_id,
-        dst=user_id,
-        rel="ASSISTS",
-        src_label="Agent",
-        dst_label="Person",
-        properties={"created_by": actor_id, "updated_by": actor_id},
-        source_uri=source_uri or "agent://logos",
-    )
+    if agent_role:
+        agent.properties.setdefault("role", agent_role)
 
     def _tx(tx):
-        upsert_node(tx, agent, timestamp, schema_store=store)
-        upsert_node(tx, user, timestamp, schema_store=store)
-        upsert_relationship(tx, assists_rel, source_uri or "agent://logos", timestamp, schema_store=store)
+        upsert_agent_assist(tx, agent, user, assists_rel, timestamp, schema_store=store, user=actor_id)
 
     client.run_in_tx(_tx)
 
