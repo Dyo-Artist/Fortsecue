@@ -24,7 +24,7 @@ Canonical bundle types (shared across pipelines):
 •	ExtractionBundle: entities, relationships, commitments, sentiment, topics; short-term with mid-term cache option for replays.
 • ResolvedBundle: entity resolution decisions (candidate matches with confidence, chosen canonical ids) plus dialectical_lines for Socratic graph links; short-term with mid-term retention for traceability.
 •	UpsertBundle: graph-ready nodes/relationships plus provenance, including dialectical_lines for dialectic edges; eligible for long-term persistence (Neo4j) but retains memory markers for what should also refresh mid-term caches.
-•	ReasoningBundle: risk/influence scores, alerts, explanations; short-term results with explicit flags indicating what should be promoted to long-term (e.g., derived scores) or kept in mid-term (e.g., hypotheses).
+•	ReasoningBundle: risk/influence scores, alerts, explanations; includes query_context, risk_score, and top_paths (edges + explanation) for explainable reasoning paths; short-term results with explicit flags indicating what should be promoted to long-term (e.g., derived scores) or kept in mid-term (e.g., hypotheses).
 •	FeedbackBundle: user or agent feedback on extractions/resolutions; mid-term by default and written to long-term if it changes the knowledgebase or graph.
 •	ConsolidationBundle (new): produced by periodic consolidation pipeline to decide what short-term/mid-term artefacts get promoted to long-term or deprecated.
 Memory semantics:

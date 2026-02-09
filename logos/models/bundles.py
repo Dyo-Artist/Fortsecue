@@ -241,6 +241,9 @@ class ReasoningBundle(PipelineBundle):
     """Placeholder for reasoning traces and observations."""
 
     meta: InteractionMeta
+    query_context: Dict[str, Any] = Field(default_factory=dict)
+    risk_score: Optional[float] = None
+    top_paths: List[Dict[str, Any]] = Field(default_factory=list)
     traces: List[Any] = Field(default_factory=list)
     notes: Optional[str] = None
     # TODO: include evaluation metrics, prompts, and revision history
