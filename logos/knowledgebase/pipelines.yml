@@ -17,6 +17,7 @@ pipeline.interaction_commit:
     - graph.upsert
     - alerts.evaluate
     - learn.capture_feedback
+    - S7_REFLECT_AND_LEARN
 
 pipeline.reasoning_alerts:
   stages:
