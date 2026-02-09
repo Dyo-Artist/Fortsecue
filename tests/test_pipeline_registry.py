@@ -33,6 +33,7 @@ def test_pipeline_loader_reads_yaml_registry():
         "graph.upsert",
         "alerts.evaluate",
         "learn.capture_feedback",
+        "S7_REFLECT_AND_LEARN",
     ]
 
 

@@ -118,3 +118,30 @@ def test_sync_stage_applies_learning_signals(tmp_path):
 
     learning_log = yaml.safe_load((base / "learning" / "signals.yml").read_text())
     assert learning_log["signals"]
+
+
+def test_update_merge_thresholds_applies_delta(tmp_path):
+    base = tmp_path / "kb"
+    store = KnowledgebaseStore(base_path=base, actor="tester")
+
+    rules_path = base / "rules" / "merge_thresholds.yml"
+    rules_path.parent.mkdir(parents=True, exist_ok=True)
+    rules_path.write_text(
+        """metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+defaults:
+  name_similarity: 0.8
+  org_similarity: 0.9
+""",
+        encoding="utf-8",
+    )
+
+    applied = store.update_merge_thresholds({"name_similarity": 0.02}, scope="defaults", reason="test update")
+
+    assert applied["name_similarity"] == 0.82
+
+    data = yaml.safe_load(rules_path.read_text())
+    assert data["defaults"]["name_similarity"] == 0.82
