@@ -1,7 +1,8 @@
 """Pipeline stage implementations."""
 
-from . import reasoning_alerts
+from . import concept_update, reasoning_alerts
 
 __all__ = [
+    "concept_update",
     "reasoning_alerts",
 ]

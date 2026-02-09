@@ -334,4 +334,5 @@ __all__ = [
 ]
 
 # Register additional pipeline stages.
+from logos.pipelines import concept_update as _concept_update  # noqa: F401,E402
 from logos.pipelines import reasoning_alerts as _reasoning_alerts  # noqa: F401,E402
