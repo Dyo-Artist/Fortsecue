@@ -6,7 +6,8 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
 
-from logos import main
+from logos import app_state, main
+from logos.api.routes import ingest as ingest_routes
 from logos.graphio.schema_store import SchemaStore
 from logos.workflows import stages
 from logos.models.bundles import InteractionMeta, PreviewBundle
@@ -69,7 +70,7 @@ def _seed_preview():
 def test_commit_endpoint_runs_upsert_bundle(monkeypatch, tmp_path):
     client = TestClient(main.app)
     dummy_client = DummyClient()
-    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    monkeypatch.setattr(ingest_routes, "get_client", lambda: dummy_client)
     tmp_schema = SchemaStore(
         tmp_path / "node_types.yml",
         tmp_path / "relationship_types.yml",
@@ -100,7 +101,7 @@ def test_commit_endpoint_returns_404_for_missing_preview():
 def test_commit_broadcasts_updates(monkeypatch):
     client = TestClient(main.app)
     dummy_client = DummyClient()
-    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    monkeypatch.setattr(ingest_routes, "get_client", lambda: dummy_client)
     _seed_preview()
 
     with client.websocket_connect("/ws/updates") as websocket:
@@ -116,7 +117,7 @@ def test_commit_broadcasts_updates(monkeypatch):
 def test_commit_api_endpoint_accepts_preview_bundle(monkeypatch, tmp_path):
     client = TestClient(main.app)
     dummy_client = DummyClient()
-    monkeypatch.setattr(main, "get_client", lambda: dummy_client)
+    monkeypatch.setattr(ingest_routes, "get_client", lambda: dummy_client)
     tmp_schema = SchemaStore(
         tmp_path / "node_types.yml",
         tmp_path / "relationship_types.yml",
@@ -125,7 +126,7 @@ def test_commit_api_endpoint_accepts_preview_bundle(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(stages, "SCHEMA_STORE", tmp_schema)
     staging_store = LocalStagingStore(tmp_path / "staging")
-    monkeypatch.setattr(main, "STAGING_STORE", staging_store)
+    monkeypatch.setattr(app_state, "STAGING_STORE", staging_store)
 
     meta = InteractionMeta(
         interaction_id="i2",

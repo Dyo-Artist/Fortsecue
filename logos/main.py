@@ -2,10 +2,9 @@
 # It must follow the architecture and schema defined in the LOGOS docs (/docs).
 # Pipeline: ingest → transcribe → nlp_extract → normalise → graphio → ui.
 import logging
-import os
 from datetime import datetime, timezone
 from uuid import uuid4
-from typing import Any, Dict, Mapping
+from typing import Any, Dict
 import pathlib
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
@@ -13,20 +12,22 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from .api.routes.ingest import legacy_router as ingest_legacy_router
+from .api.routes.ingest import router as ingest_router
 from .api.routes.projects import router as projects_router
 from .api.routes.search import router as api_search_router
 from .api.routes.stakeholder import router as stakeholder_router
 from .api.routes.alerts import router as alerts_router
-from .core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
+from . import app_state
+from .core.pipeline_executor import PipelineContext, run_pipeline
 from .graphio import graph_views
 from .graphio import search as search_module
 from .graphio.graph_views import ego_network, project_map
 from .graphio.search import search_entities
-from .graphio.neo4j_client import GraphUnavailable, get_client, ping, run_query
+from .graphio.neo4j_client import GraphUnavailable, ping, run_query
 from .interfaces.local_asr_stub import TranscriptionFailure, transcribe
 from .models.bundles import InteractionMeta, PreviewBundle, RawInputBundle
-from .services.sync import build_graph_update_event, update_broadcaster
-from .staging.store import LocalStagingStore
+from .services.sync import update_broadcaster
 
 app = FastAPI()
 templates = Jinja2Templates(
@@ -36,10 +37,12 @@ app.include_router(api_search_router, prefix="/api/v1")
 app.include_router(stakeholder_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(alerts_router, prefix="/api/v1")
-PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = {}
+app.include_router(ingest_router, prefix="/api/v1")
+app.include_router(ingest_legacy_router)
+PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = app_state.PENDING_INTERACTIONS
 # PREVIEWS is kept for backwards compatibility with existing callers/tests.
 PREVIEWS = PENDING_INTERACTIONS
-STAGING_STORE = LocalStagingStore(os.getenv("LOGOS_STAGING_DIR"))
+STAGING_STORE = app_state.STAGING_STORE
 logger = logging.getLogger(__name__)
 
 
@@ -84,8 +87,8 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
         source_type="doc",
         created_by="api",
     )
-    meta = STAGING_STORE.create_interaction(meta)
-    STAGING_STORE.save_raw_text(interaction_id, doc.text)
+    meta = app_state.STAGING_STORE.create_interaction(meta)
+    app_state.STAGING_STORE.save_raw_text(interaction_id, doc.text)
     raw_bundle = RawInputBundle(meta=meta, raw_text=doc.text, metadata={"type": "document"})
     context = PipelineContext(
         request_id=interaction_id,
@@ -94,14 +97,14 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "document",
             "source_uri": doc.source_uri,
-            "staging_store": STAGING_STORE,
-            "pending_interactions": PENDING_INTERACTIONS,
+            "staging_store": app_state.STAGING_STORE,
+            "pending_interactions": app_state.PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        app_state.STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
         logger.exception("doc_ingest_failed", extra={"interaction_id": interaction_id})
         raise
     preview_payload = (
@@ -120,8 +123,8 @@ async def ingest_note(note: Note) -> dict[str, object]:
         source_type="text",
         created_by="api",
     )
-    meta = STAGING_STORE.create_interaction(meta)
-    STAGING_STORE.save_raw_text(interaction_id, note.text)
+    meta = app_state.STAGING_STORE.create_interaction(meta)
+    app_state.STAGING_STORE.save_raw_text(interaction_id, note.text)
     raw_bundle = RawInputBundle(
         meta=meta,
         raw_text=note.text,
@@ -134,14 +137,14 @@ async def ingest_note(note: Note) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "note",
             "source_uri": note.source_uri or "",
-            "staging_store": STAGING_STORE,
-            "pending_interactions": PENDING_INTERACTIONS,
+            "staging_store": app_state.STAGING_STORE,
+            "pending_interactions": app_state.PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        app_state.STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
         logger.exception("note_ingest_failed", extra={"interaction_id": interaction_id})
         raise
     preview_payload = (
@@ -246,8 +249,8 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
         source_type="audio",
         created_by="api",
     )
-    meta = STAGING_STORE.create_interaction(meta)
-    STAGING_STORE.save_raw_text(interaction_id, text)
+    meta = app_state.STAGING_STORE.create_interaction(meta)
+    app_state.STAGING_STORE.save_raw_text(interaction_id, text)
     raw_bundle = RawInputBundle(meta=meta, raw_text=text, metadata={"type": "audio"})
     context = PipelineContext(
         request_id=interaction_id,
@@ -256,14 +259,14 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
             "interaction_id": interaction_id,
             "interaction_type": "audio",
             "source_uri": payload.source_uri,
-            "staging_store": STAGING_STORE,
-            "pending_interactions": PENDING_INTERACTIONS,
+            "staging_store": app_state.STAGING_STORE,
+            "pending_interactions": app_state.PENDING_INTERACTIONS,
         },
     )
     try:
         preview = run_pipeline("pipeline.interaction_ingest", raw_bundle, context)
     except Exception as exc:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
+        app_state.STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
         logger.exception("audio_ingest_failed", extra={"interaction_id": interaction_id})
         raise
     preview_payload = (
@@ -275,70 +278,19 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
 @app.get("/api/v1/interactions/{interaction_id}/preview")
 async def get_interaction_preview(interaction_id: str) -> dict[str, object]:
     try:
-        preview = STAGING_STORE.get_preview(interaction_id)
+        preview = app_state.STAGING_STORE.get_preview(interaction_id)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="preview_not_found") from None
 
     return preview.model_dump(mode="json")
 
 
-@app.post("/api/v1/interactions/{interaction_id}/commit")
-async def commit_interaction_api(
-    interaction_id: str, edited_preview: PreviewBundle
-) -> dict[str, object]:
-    if edited_preview.meta.interaction_id != interaction_id:
-        raise HTTPException(status_code=400, detail="interaction_id_mismatch")
-
-    try:
-        STAGING_STORE.get_preview(interaction_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="preview_not_found") from None
-
-    STAGING_STORE.save_preview(interaction_id, edited_preview)
-
-    context = PipelineContext(
-        request_id=interaction_id,
-        user_id="api",
-        context_data={
-            "interaction_id": interaction_id,
-            "graph_client_factory": get_client,
-            "commit_time": datetime.now(timezone.utc),
-            "graph_update_builder": build_graph_update_event,
-        },
-    )
-    try:
-        summary = run_pipeline("pipeline.interaction_commit", edited_preview, context)
-    except PipelineStageError as exc:
-        if isinstance(exc.cause, GraphUnavailable):
-            STAGING_STORE.set_state(interaction_id, "failed", error_message="neo4j_unavailable")
-            raise HTTPException(status_code=503, detail="neo4j_unavailable") from None
-        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
-        logger.exception("commit_failed", extra={"interaction_id": interaction_id})
-        raise HTTPException(status_code=500, detail="commit_failed") from None
-    except GraphUnavailable:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message="neo4j_unavailable")
-        raise HTTPException(status_code=503, detail="neo4j_unavailable") from None
-    except Exception:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message="commit_failed")
-        logger.exception("commit_failed", extra={"interaction_id": interaction_id})
-        raise HTTPException(status_code=500, detail="commit_failed") from None
-
-    graph_updates = context.context_data.get("graph_updates", [])
-    for update in graph_updates:
-        try:
-            await update_broadcaster.broadcast(update)
-        except Exception:  # pragma: no cover - avoid failing commit responses
-            logger.exception("Failed to broadcast graph update for interaction %s", interaction_id)
-
-    STAGING_STORE.set_state(interaction_id, "committed")
-    PENDING_INTERACTIONS.pop(interaction_id, None)
-    return summary
 
 
 @app.get("/api/v1/interactions/{interaction_id}/status")
 async def get_interaction_status(interaction_id: str) -> dict[str, object]:
     try:
-        state = STAGING_STORE.get_state(interaction_id)
+        state = app_state.STAGING_STORE.get_state(interaction_id)
     except KeyError:
         raise HTTPException(status_code=404, detail="interaction_not_found") from None
 
@@ -351,50 +303,6 @@ async def get_interaction_status(interaction_id: str) -> dict[str, object]:
     }
 
 
-@app.post("/commit/{interaction_id}")
-async def commit_interaction(interaction_id: str) -> dict[str, object]:
-    preview = PENDING_INTERACTIONS.get(interaction_id)
-    if preview is None:
-        try:
-            preview = STAGING_STORE.get_preview(interaction_id).model_dump()
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="interaction not found") from None
-
-    try:
-        context = PipelineContext(
-            request_id=interaction_id,
-            user_id="api",
-            context_data={
-                "interaction_id": interaction_id,
-                "graph_client_factory": get_client,
-                "commit_time": datetime.now(timezone.utc),
-                "graph_update_builder": build_graph_update_event,
-            },
-        )
-        summary = run_pipeline("pipeline.interaction_commit", preview, context)
-    except PipelineStageError as exc:
-        if isinstance(exc.cause, GraphUnavailable):
-            return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
-        STAGING_STORE.set_state(interaction_id, "failed", error_message=str(exc))
-        raise
-    except GraphUnavailable:
-        STAGING_STORE.set_state(interaction_id, "failed", error_message="neo4j_unavailable")
-        return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
-    except Exception:
-        logger.exception("Failed to commit interaction %s", interaction_id)
-        STAGING_STORE.set_state(interaction_id, "failed", error_message="commit_failed")
-        raise HTTPException(status_code=500, detail="commit_failed")
-
-    graph_updates = context.context_data.get("graph_updates", [])
-    for update in graph_updates:
-        try:
-            await update_broadcaster.broadcast(update)
-        except Exception:  # pragma: no cover - defensive guard to avoid failing commit responses
-            logger.exception("Failed to broadcast graph update for interaction %s", interaction_id)
-
-    PENDING_INTERACTIONS.pop(interaction_id, None)
-    STAGING_STORE.set_state(interaction_id, "committed")
-    return summary
 
 
 # Reports Neo4j availability using graphio.neo4j_client.ping().

@@ -8,6 +8,7 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 import httpx
 import pytest
 
+from logos import app_state, main
 from logos.models.bundles import InteractionMeta, PreviewBundle
 from logos.staging.store import LocalStagingStore
 
@@ -57,9 +58,7 @@ def test_local_staging_store_roundtrip(tmp_path):
 
 @pytest.mark.asyncio
 async def test_preview_and_status_endpoints(monkeypatch, tmp_path):
-    from logos import main
-
-    main.STAGING_STORE = LocalStagingStore(tmp_path / "staging")
+    app_state.STAGING_STORE = LocalStagingStore(tmp_path / "staging")
 
     meta = InteractionMeta(
         interaction_id="i-endpoint-1",
@@ -68,15 +67,15 @@ async def test_preview_and_status_endpoints(monkeypatch, tmp_path):
         source_type="doc",
         created_by="api",
     )
-    main.STAGING_STORE.create_interaction(meta)
+    app_state.STAGING_STORE.create_interaction(meta)
     preview = PreviewBundle(
         meta=meta,
         interaction={"id": meta.interaction_id, "type": meta.interaction_type, "summary": "summary"},
         entities={},
         relationships=[],
     )
-    main.STAGING_STORE.save_preview(meta.interaction_id, preview)
-    main.STAGING_STORE.set_state(meta.interaction_id, "preview_ready")
+    app_state.STAGING_STORE.save_preview(meta.interaction_id, preview)
+    app_state.STAGING_STORE.set_state(meta.interaction_id, "preview_ready")
 
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
         preview_resp = await client.get(f"/api/v1/interactions/{meta.interaction_id}/preview")

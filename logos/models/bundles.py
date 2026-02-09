@@ -255,6 +255,9 @@ class FeedbackBundle(PipelineBundle):
     meta: InteractionMeta
     feedback: Optional[str] = None
     rating: Optional[int] = None
+    corrections: List[Dict[str, Any]] = Field(default_factory=list)
+    timestamp: Optional[datetime] = None
+    user_id: Optional[str] = None
     # TODO: capture structured feedback for learning loops
 
 
