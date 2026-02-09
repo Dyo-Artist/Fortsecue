@@ -480,6 +480,8 @@ class KnowledgebaseStore:
         *,
         scope: str = "defaults",
         reason: str | None = None,
+        min_value: float = 0.0,
+        max_value: float = 1.0,
     ) -> dict[str, float]:
         """Update merge thresholds within the rules store and log versioning."""
 
@@ -501,7 +503,8 @@ class KnowledgebaseStore:
                 if not isinstance(current, (int, float)):
                     continue
                 new_value = float(current) + float(delta)
-                scope_values[key] = round(new_value, 4)
+                clamped = min(max(new_value, min_value), max_value)
+                scope_values[key] = round(clamped, 4)
                 applied[str(key)] = scope_values[key]
 
             if not applied:
