@@ -31,6 +31,18 @@ def _labels_by_keywords(labels: Iterable[str], keywords: Iterable[str]) -> list[
     return matches
 
 
+def _relationship_types_by_keywords(
+    rel_types: Iterable[str], keywords: Iterable[str]
+) -> list[str]:
+    lowered = [(rel_type, rel_type.lower()) for rel_type in rel_types]
+    matches = [
+        rel_type
+        for rel_type, lowered_rel in lowered
+        if any(keyword in lowered_rel for keyword in keywords)
+    ]
+    return matches
+
+
 def _property_candidates(keyword: str) -> list[str]:
     store = _schema_store()
     candidates: set[str] = set()
@@ -50,10 +62,19 @@ def schema_label_groups() -> dict[str, list[str]]:
         "project": _labels_by_keywords(labels, ["project"]),
         "commitment": _labels_by_keywords(labels, ["commitment"]),
         "issue": _labels_by_keywords(labels, ["issue"]),
+        "risk": _labels_by_keywords(labels, ["risk"]),
         "interaction": _labels_by_keywords(labels, ["interaction"]),
         "topic": _labels_by_keywords(labels, ["topic"]),
         "contract": _labels_by_keywords(labels, ["contract"]),
         "alert": _labels_by_keywords(labels, ["alert"]),
+    }
+
+
+def schema_relationship_groups() -> dict[str, list[str]]:
+    rel_types = list(_schema_store().relationship_types.keys())
+    return {
+        "involved_in": _relationship_types_by_keywords(rel_types, ["involved"]),
+        "works_for": _relationship_types_by_keywords(rel_types, ["works_for", "worksfor"]),
     }
 
 
@@ -261,6 +282,77 @@ def get_ego_graph(entity_id: str) -> dict[str, list[dict[str, Any]]]:
     return {"nodes": row.get("nodes", []), "edges": row.get("edges", [])}
 
 
+def _project_related_nodes(
+    *,
+    project_id: str,
+    project_labels: Sequence[str],
+    target_labels: Sequence[str],
+) -> list[dict[str, Any]]:
+    rows = list(
+        run_query(
+            (
+                "MATCH (pr {id: $project_id}) "
+                "WHERE (size($project_labels) = 0 OR any(label IN labels(pr) WHERE label IN $project_labels)) "
+                "OPTIONAL MATCH (pr)-[rel]-(n) "
+                "WHERE (size($target_labels) = 0 OR any(label IN labels(n) WHERE label IN $target_labels)) "
+                "RETURN collect(DISTINCT n{.*, labels: labels(n)}) AS nodes"
+            ),
+            {
+                "project_id": project_id,
+                "project_labels": list(project_labels),
+                "target_labels": list(target_labels),
+            },
+        )
+    )
+    if not rows:
+        return []
+    return rows[0].get("nodes", []) or []
+
+
+def _project_stakeholders(
+    *,
+    project_id: str,
+    project_labels: Sequence[str],
+    stakeholder_labels: Sequence[str],
+    org_labels: Sequence[str],
+    involved_rel_types: Sequence[str],
+    works_for_rel_types: Sequence[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows = list(
+        run_query(
+            (
+                "MATCH (pr {id: $project_id}) "
+                "WHERE (size($project_labels) = 0 OR any(label IN labels(pr) WHERE label IN $project_labels)) "
+                "OPTIONAL MATCH (stakeholder)-[r]-(pr) "
+                "WHERE (size($stakeholder_labels) = 0 "
+                "OR any(label IN labels(stakeholder) WHERE label IN $stakeholder_labels)) "
+                "AND (size($involved_rel_types) = 0 OR type(r) IN $involved_rel_types) "
+                "OPTIONAL MATCH (stakeholder)-[wf]-(org) "
+                "WHERE (size($org_labels) = 0 OR any(label IN labels(org) WHERE label IN $org_labels)) "
+                "AND (size($works_for_rel_types) = 0 OR type(wf) IN $works_for_rel_types) "
+                "RETURN collect(DISTINCT {"
+                "stakeholder: stakeholder{.*, labels: labels(stakeholder)}, "
+                "rel_props: properties(r), "
+                "rel_type: type(r)"
+                "}) AS stakeholders, "
+                "collect(DISTINCT org{.*, labels: labels(org)}) AS orgs"
+            ),
+            {
+                "project_id": project_id,
+                "project_labels": list(project_labels),
+                "stakeholder_labels": list(stakeholder_labels),
+                "org_labels": list(org_labels),
+                "involved_rel_types": list(involved_rel_types),
+                "works_for_rel_types": list(works_for_rel_types),
+            },
+        )
+    )
+    if not rows:
+        return [], []
+    row = rows[0]
+    return row.get("stakeholders", []) or [], row.get("orgs", []) or []
+
+
 def _commitment_is_closed(status: Any) -> bool:
     if status is None:
         return False
@@ -361,4 +453,112 @@ def build_stakeholder_view(
     }
     if include_graph:
         response["ego_graph"] = get_ego_graph(stakeholder_id)
+    return response
+
+
+def _extract_role(rel_props: Mapping[str, Any]) -> tuple[str | None, bool | None]:
+    role_type = rel_props.get("role_type") or rel_props.get("role") or rel_props.get("roleType")
+    if "is_primary" in rel_props:
+        is_primary = rel_props.get("is_primary")
+    elif "primary" in rel_props:
+        is_primary = rel_props.get("primary")
+    else:
+        is_primary = rel_props.get("isPrimary")
+    return role_type, is_primary
+
+
+def build_project_map_view(
+    *, project_id: str, include_graph: bool = True
+) -> dict[str, Any] | None:
+    profile = get_node_profile(project_id)
+    if profile is None:
+        return None
+
+    labels = profile.get("labels", [])
+    props = profile.get("props", {})
+    profile_payload = {**props, "labels": labels}
+
+    label_groups = schema_label_groups()
+    relationship_groups = schema_relationship_groups()
+
+    project_labels = label_groups.get("project", [])
+    person_labels = label_groups.get("person", [])
+    org_labels = label_groups.get("org", [])
+    commitment_labels = label_groups.get("commitment", [])
+    issue_labels = label_groups.get("issue", [])
+    risk_labels = label_groups.get("risk", [])
+
+    stakeholder_labels = sorted({*person_labels, *org_labels})
+    involved_rel_types = relationship_groups.get("involved_in", [])
+    works_for_rel_types = relationship_groups.get("works_for", [])
+
+    stakeholder_rows, orgs = _project_stakeholders(
+        project_id=project_id,
+        project_labels=project_labels,
+        stakeholder_labels=stakeholder_labels,
+        org_labels=org_labels,
+        involved_rel_types=involved_rel_types,
+        works_for_rel_types=works_for_rel_types,
+    )
+
+    stakeholders: list[dict[str, Any]] = []
+    for entry in stakeholder_rows:
+        stakeholder = entry.get("stakeholder") or {}
+        rel_props = entry.get("rel_props") or {}
+        rel_type = entry.get("rel_type")
+        role_type, is_primary = _extract_role(rel_props)
+        labels_list = stakeholder.get("labels", [])
+        payload: dict[str, Any] = {}
+        if any(label in labels_list for label in person_labels):
+            payload["person"] = stakeholder
+        elif any(label in labels_list for label in org_labels):
+            payload["org"] = stakeholder
+        else:
+            payload["entity"] = stakeholder
+        if role_type is not None:
+            payload["role_type"] = role_type
+        if is_primary is not None:
+            payload["is_primary"] = bool(is_primary)
+        if rel_type:
+            payload["relationship_type"] = rel_type
+        stakeholders.append(payload)
+
+    commitments = _project_related_nodes(
+        project_id=project_id,
+        project_labels=project_labels,
+        target_labels=commitment_labels,
+    )
+    issues = _project_related_nodes(
+        project_id=project_id,
+        project_labels=project_labels,
+        target_labels=issue_labels,
+    )
+    risks = _project_related_nodes(
+        project_id=project_id,
+        project_labels=project_labels,
+        target_labels=risk_labels,
+    )
+
+    open_commitments = [
+        commitment
+        for commitment in commitments
+        if not _commitment_is_closed(commitment.get("status"))
+    ]
+
+    response: dict[str, Any] = {
+        "project": profile_payload,
+        "stakeholders": stakeholders,
+        "orgs": orgs,
+        "commitments": commitments,
+        "issues": issues,
+        "risks": risks,
+        "project_summary": {
+            "project": profile_payload,
+            "stakeholders": stakeholders,
+            "open_commitments": open_commitments,
+            "issues": issues,
+        },
+    }
+    if include_graph:
+        response["ego_graph"] = get_ego_graph(project_id)
     return response
