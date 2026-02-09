@@ -263,6 +263,69 @@ def get_alerts(
     return rows[0].get("alerts", []) or []
 
 
+def list_alerts(
+    *,
+    types: Sequence[str] | None = None,
+    statuses: Sequence[str] | None = None,
+    project_id: str | None = None,
+    stakeholder_id: str | None = None,
+    org_id: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict[str, Any]], int]:
+    skip = max(page - 1, 0) * page_size
+    groups = schema_label_groups()
+    alert_labels = groups.get("alert", [])
+    if not alert_labels:
+        return [], 0
+    stakeholder_props = sorted(
+        set(_property_candidates("stakeholder") + _property_candidates("person"))
+    )
+    org_props = _property_candidates("org")
+    project_props = _property_candidates("project")
+    params = {
+        "labels": alert_labels,
+        "types": list(types) if types else None,
+        "statuses": list(statuses) if statuses else None,
+        "project_id": project_id,
+        "stakeholder_id": stakeholder_id,
+        "org_id": org_id,
+        "project_props": project_props,
+        "stakeholder_props": stakeholder_props,
+        "org_props": org_props,
+        "skip": skip,
+        "limit": page_size,
+    }
+    filter_clause = (
+        "WHERE any(label IN labels(a) WHERE label IN $labels) "
+        "AND ($types IS NULL OR a.type IN $types) "
+        "AND ($statuses IS NULL OR a.status IN $statuses) "
+        "AND ($project_id IS NULL OR any(prop IN $project_props WHERE a[prop] = $project_id)) "
+        "AND ("
+        "  $stakeholder_id IS NULL "
+        "  OR any(prop IN $stakeholder_props WHERE a[prop] = $stakeholder_id) "
+        ") "
+        "AND ($org_id IS NULL OR any(prop IN $org_props WHERE a[prop] = $org_id)) "
+    )
+    count_query = (
+        "MATCH (a) "
+        f"{filter_clause}"
+        "RETURN count(a) AS total"
+    )
+    count_rows = list(run_query(count_query, params))
+    total = int(count_rows[0]["total"]) if count_rows else 0
+    items_query = (
+        "MATCH (a) "
+        f"{filter_clause}"
+        "RETURN a{.*} AS alert "
+        "ORDER BY coalesce(a.last_updated_at, a.first_detected_at) DESC "
+        "SKIP $skip LIMIT $limit"
+    )
+    rows = list(run_query(items_query, params))
+    alerts = [row["alert"] for row in rows]
+    return alerts, total
+
+
 def get_ego_graph(entity_id: str) -> dict[str, list[dict[str, Any]]]:
     rows = list(
         run_query(

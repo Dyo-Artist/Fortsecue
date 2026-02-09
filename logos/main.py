@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from .api.routes.projects import router as projects_router
 from .api.routes.search import router as api_search_router
 from .api.routes.stakeholder import router as stakeholder_router
+from .api.routes.alerts import router as alerts_router
 from .core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
 from .graphio import graph_views
 from .graphio import search as search_module
@@ -34,6 +35,7 @@ templates = Jinja2Templates(
 app.include_router(api_search_router, prefix="/api/v1")
 app.include_router(stakeholder_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
+app.include_router(alerts_router, prefix="/api/v1")
 PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = {}
 # PREVIEWS is kept for backwards compatibility with existing callers/tests.
 PREVIEWS = PENDING_INTERACTIONS
