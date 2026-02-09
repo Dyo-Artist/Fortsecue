@@ -26,13 +26,15 @@ class FakeTx:
         return []
 
 
-def _temp_schema(tmp_path) -> SchemaStore:
+def _temp_schema(tmp_path, node_types_payload: str | None = None) -> SchemaStore:
     node_path = tmp_path / "node_types.yml"
     rel_path = tmp_path / "relationship_types.yml"
     rules_path = tmp_path / "rules.yml"
     version_path = tmp_path / "version.yml"
     rules_path.write_text("usage_deprecation:\n  min_usage: 1\n  stale_after_days: 180\n")
     version_path.write_text("version: 1\nlast_updated: null\n")
+    if node_types_payload:
+        node_path.write_text(node_types_payload)
     return SchemaStore(node_path, rel_path, rules_path, version_path)
 
 
@@ -60,6 +62,36 @@ def test_upsert_node_records_schema_and_concept_link(tmp_path):
     node_types = yaml.safe_load((tmp_path / "node_types.yml").read_text())["node_types"]
     assert "Person" in node_types
     assert node_types["Person"]["usage_count"] == 1
+
+
+def test_upsert_node_uses_schema_concept_kind_for_concept(tmp_path):
+    tx = FakeTx()
+    now = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    node_types_payload = (
+        "node_types:\n"
+        "  Person:\n"
+        "    concept_kind: StakeholderType\n"
+        "    properties:\n"
+        "    - name\n"
+        "  Concept:\n"
+        "    concept_kind: Form\n"
+        "    properties:\n"
+        "    - name\n"
+        "    - kind\n"
+    )
+    store = _temp_schema(tmp_path, node_types_payload=node_types_payload)
+    node = GraphNode(
+        id="p2",
+        label="Person",
+        properties={"name": "Robin"},
+        concept_id="stakeholder_type_partner",
+        source_uri="src",
+    )
+
+    upsert_node(tx, node, now, schema_store=store)
+
+    concept_call = next(call for call in tx.calls if "MERGE (n:Concept" in call[0])
+    assert concept_call[1]["props"]["kind"] == "StakeholderType"
 
 
 def test_upsert_relationship_accepts_dynamic_type(tmp_path):

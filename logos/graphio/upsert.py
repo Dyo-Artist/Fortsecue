@@ -121,12 +121,13 @@ def _merge_concept(
         return
     concept_label = schema_store.get_schema_convention("concept_label", "Concept")
     instance_rel = schema_store.get_schema_convention("instance_of_relationship", "INSTANCE_OF")
+    resolved_kind = concept_kind or "DynamicConcept"
     concept_node = GraphNode(
         id=concept_id,
         label=concept_label,
         properties={
             "name": concept_id,
-            "kind": concept_kind or node.concept_kind or "DynamicConcept",
+            "kind": resolved_kind,
         },
         source_uri=node.source_uri,
     )
@@ -142,6 +143,16 @@ def _merge_concept(
     upsert_relationship(tx, rel, rel.source_uri or "", now, schema_store=schema_store, user=user)
 
 
+def _resolve_concept_kind(node: GraphNode, schema_store: SchemaStore) -> str | None:
+    if node.concept_kind:
+        return node.concept_kind
+    label = _ensure_valid_label(node.label)
+    entry = schema_store.node_types.get(label)
+    if entry and entry.concept_kind:
+        return entry.concept_kind
+    return None
+
+
 def upsert_node(
     tx,
     node: GraphNode,
@@ -151,11 +162,12 @@ def upsert_node(
     user: str | None = "system",
 ) -> None:
     label = _ensure_valid_label(node.label)
+    resolved_concept_kind = _resolve_concept_kind(node, schema_store)
     props = _clean_properties(node.properties)
     schema_props = set(props.keys()) | {"source_uri"}
     if not node.source_uri:
         raise ValueError(f"GraphNode {node.id} is missing a source_uri for provenance")
-    schema_store.record_node_type(label, schema_props, concept_kind=node.concept_kind, now=now)
+    schema_store.record_node_type(label, schema_props, concept_kind=resolved_concept_kind, now=now)
 
     cypher = (
         f"MERGE (n:{label} {{id: $id}}) "
@@ -176,7 +188,8 @@ def upsert_node(
             "user": user,
         },
     )
-    _merge_concept(tx, node, node.concept_kind, now, schema_store=schema_store, user=user)
+    if node.concept_id:
+        _merge_concept(tx, node, resolved_concept_kind, now, schema_store=schema_store, user=user)
 
 
 def _labelled_node(var: str, label: str | None) -> str:
