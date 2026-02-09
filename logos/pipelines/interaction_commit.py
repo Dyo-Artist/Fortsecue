@@ -99,7 +99,11 @@ def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
         return bundle
 
     actor = str(context.get("user") or context.get("user_id") or "system")
-    kb_store = KnowledgebaseStore(base_path=context.get("knowledgebase_path"), actor=actor)
+    knowledgebase_path = context.get("knowledgebase_path")
+    if not knowledgebase_path:
+        logger.info("reflect_and_learn_skip_no_kb", extra={"stage": "S7_REFLECT_AND_LEARN"})
+        return bundle
+    kb_store = KnowledgebaseStore(base_path=knowledgebase_path, actor=actor)
 
     obligation_candidates: Counter[str] = Counter()
     synonym_candidates: Counter[tuple[str, str, str]] = Counter()

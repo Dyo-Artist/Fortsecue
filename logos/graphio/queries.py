@@ -509,6 +509,23 @@ def get_reasoning_paths(
     return scored[: max(limit, 0)]
 
 
+def get_top_paths(
+    *,
+    stakeholder_id: str | None = None,
+    project_id: str | None = None,
+    limit: int = 3,
+    max_hops: int = 4,
+) -> list[dict[str, Any]]:
+    """Lightweight wrapper for reasoning paths used by agent dialogue pipelines."""
+
+    return get_reasoning_paths(
+        stakeholder_id=stakeholder_id,
+        project_id=project_id,
+        limit=limit,
+        max_hops=max_hops,
+    )
+
+
 def get_ego_graph(entity_id: str) -> dict[str, list[dict[str, Any]]]:
     rows = list(
         run_query(

@@ -250,6 +250,9 @@ def sync_knowledgebase(bundle: ExtractionBundle, context: Dict[str, Any] | None 
     if not isinstance(updater, KnowledgebaseStore):
         base_path = context.get("knowledgebase_path")
         actor = context.get("actor") or context.get("user") or "system"
+        if base_path is None:
+            LOGGER.info("knowledgebase_sync_skip_no_path", extra={"stage": "sync_knowledgebase"})
+            return bundle
         updater = KnowledgebaseStore(base_path=base_path, actor=str(actor))
 
     updates: dict[str, list[str]] = {
@@ -549,9 +552,13 @@ def persist_session_memory(bundle: Dict[str, Any], context: Dict[str, Any] | Non
     manager = _get_memory_manager(context)
     session_id = str(context.get("interaction_id") or bundle.get("interaction_id") or "")
     kb_store = context.get("knowledge_updater")
+    knowledgebase_path = context.get("knowledgebase_path")
     if not isinstance(kb_store, KnowledgebaseStore):
+        if knowledgebase_path is None:
+            logger.info("session_memory_skip_persist", extra={"session_id": session_id})
+            return bundle
         kb_store = KnowledgebaseStore(
-            base_path=context.get("knowledgebase_path"), actor=str(context.get("actor") or context.get("user") or "system")
+            base_path=knowledgebase_path, actor=str(context.get("actor") or context.get("user") or "system")
         )
 
     def _persist(item: MemoryItem, payload: Dict[str, Any]) -> None:

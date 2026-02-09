@@ -62,9 +62,15 @@ class LocalStagingStore(StagingStore):
 
     def __init__(self, base_path: Path | str | None = None) -> None:
         self.base_path = Path(base_path or os.getenv("LOGOS_STAGING_DIR", Path(".logos") / "staging"))
-        self.base_path.mkdir(parents=True, exist_ok=True)
         self.index_path = self.base_path / "index.sqlite"
+        self._ready = False
+
+    def _ensure_ready(self) -> None:
+        if self._ready:
+            return
+        self.base_path.mkdir(parents=True, exist_ok=True)
         self._ensure_index()
+        self._ready = True
 
     def _ensure_index(self) -> None:
         with sqlite3.connect(self.index_path) as conn:
@@ -101,6 +107,7 @@ class LocalStagingStore(StagingStore):
         os.replace(tmp_path, path)
 
     def create_interaction(self, meta: InteractionMeta) -> InteractionMeta:
+        self._ensure_ready()
         interaction_id = meta.interaction_id or meta.model_copy().interaction_id
         meta.interaction_id = interaction_id
         interaction_dir = self._interaction_dir(interaction_id)
@@ -142,6 +149,7 @@ class LocalStagingStore(StagingStore):
         return meta
 
     def save_raw_file(self, interaction_id: str, content: bytes, filename: str, mime_type: str) -> Path:
+        self._ensure_ready()
         safe_name = Path(filename).name or "raw_input"
         raw_dir = self._interaction_dir(interaction_id) / "raw"
         target = raw_dir / safe_name
@@ -150,6 +158,7 @@ class LocalStagingStore(StagingStore):
         return target
 
     def save_raw_text(self, interaction_id: str, text: str) -> Path:
+        self._ensure_ready()
         raw_dir = self._interaction_dir(interaction_id) / "raw"
         target = raw_dir / "input.txt"
         self._atomic_write(target, text)
@@ -157,11 +166,13 @@ class LocalStagingStore(StagingStore):
         return target
 
     def save_preview(self, interaction_id: str, preview: PreviewBundle) -> None:
+        self._ensure_ready()
         target = self._interaction_dir(interaction_id) / "preview.json"
         self._atomic_write(target, preview.model_dump_json(indent=2))
         self._update_paths(interaction_id, preview_path=str(target))
 
     def _update_paths(self, interaction_id: str, raw_path: str | None = None, preview_path: str | None = None) -> None:
+        self._ensure_ready()
         now_iso = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.index_path) as conn:
             conn.execute("BEGIN")
@@ -172,6 +183,7 @@ class LocalStagingStore(StagingStore):
             conn.commit()
 
     def get_preview(self, interaction_id: str) -> PreviewBundle:
+        self._ensure_ready()
         path = self._interaction_dir(interaction_id) / "preview.json"
         if not path.exists():
             raise FileNotFoundError(f"Preview missing for interaction {interaction_id}")
@@ -179,6 +191,7 @@ class LocalStagingStore(StagingStore):
         return PreviewBundle.model_validate(data)
 
     def set_state(self, interaction_id: str, state: StagingState, error_message: str | None = None) -> None:
+        self._ensure_ready()
         now_iso = datetime.now(timezone.utc).isoformat()
         with sqlite3.connect(self.index_path) as conn:
             conn.execute(
@@ -209,6 +222,7 @@ class LocalStagingStore(StagingStore):
             conn.commit()
 
     def get_state(self, interaction_id: str) -> InteractionState:
+        self._ensure_ready()
         with sqlite3.connect(self.index_path) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.execute(
@@ -229,6 +243,7 @@ class LocalStagingStore(StagingStore):
         )
 
     def prune(self, max_age_days: int = 30) -> int:
+        self._ensure_ready()
         cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
         removed = 0
         with sqlite3.connect(self.index_path) as conn:

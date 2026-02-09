@@ -25,6 +25,14 @@ def test_add_obligation_phrase_tracks_version_and_changelog(tmp_path):
     assert changelog[-1]["path"] == "lexicons/obligation_phrases.yml"
 
 
+def test_store_init_does_not_create_versioning_dirs(tmp_path):
+    base = tmp_path / "kb"
+    KnowledgebaseStore(base_path=base, actor="tester")
+
+    assert not (base / "versioning").exists()
+    assert not (base / "versioning" / "locks").exists()
+
+
 def test_schema_updates_increment_version(tmp_path):
     base = tmp_path / "kb"
     store = KnowledgebaseStore(base_path=base, actor="tester")

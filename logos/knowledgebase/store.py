@@ -52,6 +52,8 @@ class KnowledgebaseStore:
         self.versioning_path = self.base_path / "versioning"
         self.lock_dir = self.versioning_path / "locks"
         self.changelog_path = self.versioning_path / "changelog.yml"
+
+    def _ensure_versioning_paths(self) -> None:
         self.versioning_path.mkdir(parents=True, exist_ok=True)
         self.lock_dir.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +69,7 @@ class KnowledgebaseStore:
 
     @contextmanager
     def _file_lock(self, path: Path):  # pragma: no cover - exercised indirectly
+        self._ensure_versioning_paths()
         lock_path = self._lock_path(path)
         with self._process_lock:
             with lock_path.open("w", encoding="utf-8") as lock_file:
@@ -124,6 +127,7 @@ class KnowledgebaseStore:
             "details": dict(details or {}),
         }
 
+        self._ensure_versioning_paths()
         with self._file_lock(self.changelog_path):
             existing: list[dict[str, Any]] = []
             if self.changelog_path.exists():
