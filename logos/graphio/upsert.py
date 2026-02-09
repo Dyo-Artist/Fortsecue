@@ -1,17 +1,18 @@
 from __future__ import annotations
 
-import re
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
+from pydantic import BaseModel, ConfigDict, Field
 from logos.graphio.neo4j_client import get_client
 from logos.graphio.schema_store import SchemaStore
+from logos.graphio.types import (
+    GraphNode,
+    GraphRelationship,
+    _ensure_valid_label,
+    _ensure_valid_rel_type,
+)
 from logos.models.bundles import UpsertBundle
-
-LABEL_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
-REL_TYPE_PATTERN = re.compile(r"^[A-Z0-9_]+$")
 
 SCHEMA_STORE = SchemaStore()
 
@@ -34,65 +35,6 @@ def _clean_properties(properties: Mapping[str, Any]) -> dict[str, Any]:
         else:
             cleaned[key] = value
     return cleaned
-
-
-def _ensure_valid_label(label: str) -> str:
-    candidate = label[0].upper() + label[1:] if label else label
-    if not LABEL_PATTERN.match(candidate):
-        raise ValueError(f"Invalid node label: {label}")
-    return candidate
-
-
-def _ensure_valid_rel_type(rel_type: str) -> str:
-    if not REL_TYPE_PATTERN.match(rel_type):
-        raise ValueError(f"Invalid relationship type: {rel_type}")
-    return rel_type
-
-
-class GraphNode(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    id: str
-    label: str
-    properties: dict[str, Any] = Field(default_factory=dict)
-    concept_id: str | None = None
-    concept_kind: str | None = None
-    source_uri: str | None = None
-
-    @field_validator("label")
-    @classmethod
-    def _validate_label(cls, value: str) -> str:
-        return _ensure_valid_label(value)
-
-
-class GraphRelationship(BaseModel):
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
-
-    src: str
-    dst: str
-    rel_type: str = Field(alias="rel")
-    src_label: str | None = None
-    dst_label: str | None = None
-    properties: dict[str, Any] = Field(default_factory=dict)
-    source_uri: str | None = None
-
-    @field_validator("rel_type")
-    @classmethod
-    def _validate_rel(cls, value: str) -> str:
-        return _ensure_valid_rel_type(value.upper())
-
-    @field_validator("src_label", "dst_label")
-    @classmethod
-    def _validate_optional_labels(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _ensure_valid_label(value)
-
-    @property
-    def rel(self) -> str:
-        """Backwards-compatible access to the relationship type."""
-
-        return self.rel_type
 
 
 class InteractionBundle(BaseModel):
@@ -279,6 +221,10 @@ def _commit_bundle_tx(
         rel = GraphRelationship.model_validate(rel_data)
         rel_source = rel.source_uri or rel_data.get("source_uri") or source_uri
         upsert_relationship(tx, rel, rel_source, now, schema_store=schema_store, user=user)
+    for line in bundle.dialectical_lines:
+        rel = GraphRelationship.model_validate(line)
+        rel_source = rel.source_uri or source_uri
+        upsert_relationship(tx, rel, rel_source, now, schema_store=schema_store, user=user)
 
 
 def commit_upsert_bundle(bundle: UpsertBundle, user: str | None = "system") -> dict[str, Any]:
@@ -295,6 +241,7 @@ def commit_upsert_bundle(bundle: UpsertBundle, user: str | None = "system") -> d
         "interaction_id": bundle.meta.interaction_id,
         "nodes_committed": len(bundle.nodes),
         "relationships_committed": len(bundle.relationships),
+        "dialectical_lines_committed": len(bundle.dialectical_lines),
     }
 
 

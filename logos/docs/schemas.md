@@ -13,17 +13,18 @@ flexibility for the evolving knowledgebase schema.
   knowledgebase), relationships, and metrics such as sentiment. The raw
   extraction dict is preserved for learning loops.
 - **ResolvedBundle**: entity/relationship resolution output with canonical or
-  provisional identifiers and action hints (`create|keep|link|ignore`). Preview
-  flows commonly map this into a `PreviewBundle` for user edits.
+  provisional identifiers and action hints (`create|keep|link|ignore`), plus
+  `dialectical_lines` for dialectic graph edges. Preview flows commonly map
+  this into a `PreviewBundle` for user edits.
 - **PreviewBundle**: UI-facing preview snapshot with interaction summary and
   resolved/linked entities; it represents the editable, resolved bundle that is
   returned to clients for review.
-- **UpsertBundle**: graph-ready nodes/relationships with provenance; bundles
-  must be fully materialised (stable ids for all nodes and relationships
-  referencing those ids directly) before commit. **ReasoningBundle /
-  FeedbackBundle** remain reserved for reasoning traces and human feedback while
-  keeping the evolving schema writable without hard-coding node/relationship
-  types.
+- **UpsertBundle**: graph-ready nodes/relationships with provenance, including
+  `dialectical_lines` for dialectic relationships; bundles must be fully
+  materialised (stable ids for all nodes and relationships referencing those
+  ids directly) before commit. **ReasoningBundle / FeedbackBundle** remain
+  reserved for reasoning traces and human feedback while keeping the evolving
+  schema writable without hard-coding node/relationship types.
 
 Bundles carry `bundle_version` and `processing_version` to allow pipeline stages
 and API consumers to reason about compatibility and replay behaviour.

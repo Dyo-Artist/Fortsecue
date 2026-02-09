@@ -13,6 +13,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from logos.graphio.types import GraphRelationship
+
 
 class LogosBaseModel(BaseModel):
     """Base model with permissive extras for evolving schema support."""
@@ -189,6 +191,7 @@ class ResolvedBundle(PipelineBundle):
     meta: InteractionMeta
     resolved_entities: Dict[str, List[EntityMention]] = Field(default_factory=dict)
     resolved_relationships: List[Relationship] = Field(default_factory=list)
+    dialectical_lines: List[GraphRelationship] = Field(default_factory=list)
     low_confidence_flags: List[str] = Field(default_factory=list)
 
 
@@ -230,6 +233,7 @@ class UpsertBundle(PipelineBundle):
     meta: InteractionMeta
     nodes: List[Mapping[str, Any]] = Field(default_factory=list)
     relationships: List[Mapping[str, Any]] = Field(default_factory=list)
+    dialectical_lines: List[GraphRelationship] = Field(default_factory=list)
     # TODO: expand when commit pipeline is formalised
 
 
