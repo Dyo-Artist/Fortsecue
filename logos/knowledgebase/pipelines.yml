@@ -29,3 +29,11 @@ pipeline.reasoning_alerts:
 pipeline.concept_update:
   stages:
     - concepts.update
+
+pipeline.agent_dialogue:
+  stages:
+    - A1_PARSE_QUERY
+    - A2_PLAN_DIALECTIC
+    - A3_QUERY_GRAPH
+    - A4_COMPOSE_RESPONSE
+    - A5_CAPTURE_FEEDBACK

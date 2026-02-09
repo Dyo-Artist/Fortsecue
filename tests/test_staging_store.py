@@ -56,6 +56,13 @@ def test_local_staging_store_roundtrip(tmp_path):
     assert committed_state.state == "committed"
 
 
+def test_staging_store_init_is_lazy(tmp_path):
+    base_path = tmp_path / "staging"
+    LocalStagingStore(base_path)
+
+    assert not base_path.exists()
+
+
 @pytest.mark.asyncio
 async def test_preview_and_status_endpoints(monkeypatch, tmp_path):
     app_state.STAGING_STORE = LocalStagingStore(tmp_path / "staging")

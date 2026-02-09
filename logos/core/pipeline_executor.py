@@ -337,3 +337,4 @@ __all__ = [
 from logos.pipelines import concept_update as _concept_update  # noqa: F401,E402
 from logos.pipelines import interaction_commit as _interaction_commit  # noqa: F401,E402
 from logos.pipelines import reasoning_alerts as _reasoning_alerts  # noqa: F401,E402
+from logos.pipelines import agent_dialogue as _agent_dialogue  # noqa: F401,E402

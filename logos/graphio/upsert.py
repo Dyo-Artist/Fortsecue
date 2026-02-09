@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -14,7 +15,13 @@ from logos.graphio.types import (
 )
 from logos.models.bundles import UpsertBundle
 
-SCHEMA_STORE = SchemaStore()
+
+def _schema_mutable_default() -> bool:
+    value = os.getenv("LOGOS_SCHEMA_MUTABLE", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+SCHEMA_STORE = SchemaStore(mutable=_schema_mutable_default())
 
 
 def _dt_param(value: datetime) -> str:
