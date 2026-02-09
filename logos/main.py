@@ -13,6 +13,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+from .api.routes.search import router as api_search_router
+from .api.routes.stakeholder import router as stakeholder_router
 from .core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
 from .graphio import graph_views
 from .graphio import search as search_module
@@ -28,6 +30,8 @@ app = FastAPI()
 templates = Jinja2Templates(
     directory=str(pathlib.Path(__file__).resolve().parent / "templates")
 )
+app.include_router(api_search_router, prefix="/api/v1")
+app.include_router(stakeholder_router, prefix="/api/v1")
 PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = {}
 # PREVIEWS is kept for backwards compatibility with existing callers/tests.
 PREVIEWS = PENDING_INTERACTIONS
