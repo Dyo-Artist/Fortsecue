@@ -7,10 +7,19 @@ from math import ceil
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
+from ...core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
 from ...graphio import queries as graph_queries
-from ...graphio.neo4j_client import GraphUnavailable
+from ...graphio.neo4j_client import GraphUnavailable, get_client
 
 router = APIRouter()
+
+def _run_reasoning_alerts() -> None:
+    context = PipelineContext(
+        context_data={
+            "graph_client_factory": get_client,
+        }
+    )
+    run_pipeline("pipeline.reasoning_alerts", {}, context)
 
 
 def _parse_filters(raw_filters: list[str] | None) -> list[str]:
@@ -35,6 +44,7 @@ async def list_alerts(
     types = _parse_filters(type_filters)
     statuses = _parse_filters(status_filters)
     try:
+        _run_reasoning_alerts()
         items, total = graph_queries.list_alerts(
             types=types or None,
             statuses=statuses or None,
@@ -44,6 +54,10 @@ async def list_alerts(
             page=page,
             page_size=page_size,
         )
+    except PipelineStageError as exc:
+        if isinstance(exc.cause, GraphUnavailable):
+            return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
+        raise
     except GraphUnavailable:
         return JSONResponse(status_code=503, content={"error": "neo4j_unavailable"})
     total_pages = ceil(total / page_size) if page_size else 1

@@ -1,23 +1,7 @@
 metadata:
-  version: "0.1.0"
-  updated_at: "2024-01-01T00:00:00Z"
-  updated_by: "system"
-
-ingest_preview:
-  - logos.workflows.stages.require_raw_input
-  - logos.workflows.stages.tokenise_text
-  - logos.workflows.stages.apply_extraction
-  - logos.workflows.stages.sync_knowledgebase
-  - logos.workflows.stages.build_preview_payload
-
-commit_interaction:
-  - logos.workflows.stages.require_preview_payload
-  - logos.workflows.stages.capture_preview_memory
-  - logos.workflows.stages.resolve_entities_from_graph
-  - logos.workflows.stages.build_interaction_bundle_stage
-  - logos.workflows.stages.upsert_interaction_bundle_stage
-  - logos.workflows.stages.persist_session_memory
-
+  version: 0.1.0
+  updated_at: '2024-01-01T00:00:00Z'
+  updated_by: system
 memory_consolidation:
-  - logos.workflows.stages.ensure_memory_manager
-  - logos.workflows.stages.consolidate_memory_stage
+- logos.workflows.stages.ensure_memory_manager
+- logos.workflows.stages.consolidate_memory_stage

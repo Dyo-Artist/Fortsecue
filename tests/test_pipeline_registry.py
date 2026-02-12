@@ -25,13 +25,12 @@ def test_pipeline_loader_reads_yaml_registry():
         "ingest.validate_input",
         "ingest.parse_or_transcribe",
         "nlp.extract",
-        "normalise.resolve_entities",
         "preview.assemble",
     ]
     assert pipelines["pipeline.interaction_commit"] == [
         "commit.validate",
+        "normalise.resolve_entities",
         "graph.upsert",
-        "alerts.evaluate",
         "learn.capture_feedback",
         "S7_REFLECT_AND_LEARN",
     ]
