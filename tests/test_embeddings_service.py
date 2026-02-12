@@ -51,6 +51,12 @@ class FakeNeo4jClient:
                 node["embedding_graph"] = params["embedding"]
                 node["embedding_graph_model"] = params["embedding_model"]
             node["embedding_model"] = params["embedding_model"]
+            node["embedding_model_version"] = params["embedding_model_version"]
+            node["content_hash"] = params["content_hash"]
+            if "embedding_text_content_hash" in cypher:
+                node["embedding_text_content_hash"] = params["content_hash"]
+            if "embedding_graph_content_hash" in cypher:
+                node["embedding_graph_content_hash"] = params["content_hash"]
             node["embedding_updated_at"] = params["embedding_updated_at"]
             self.write_calls.append((cypher, params))
             return []
@@ -96,6 +102,8 @@ def test_embedding_service_writes_text_and_graph_embeddings(tmp_path: Path) -> N
     assert "embedding_text" in client.nodes["Interaction"]["i1"]
     assert "embedding_graph" in client.nodes["Concept"]["c1"]
     assert client.nodes["Concept"]["c1"]["embedding_model"] == result["graph_embedding_model"]
+    assert "content_hash" in client.nodes["Concept"]["c1"]
+    assert "embedding_model_version" in client.nodes["Concept"]["c1"]
 
 
 def test_embedding_service_is_idempotent_for_fixed_seed(tmp_path: Path) -> None:
@@ -118,3 +126,31 @@ def test_embedding_service_is_idempotent_for_fixed_seed(tmp_path: Path) -> None:
     assert second["text_embeddings_updated"] == 0
     assert second["graph_embeddings_updated"] == 0
     assert len(client.write_calls) == writes_after_first
+
+
+def test_text_embedding_changes_only_when_text_hash_changes(tmp_path: Path) -> None:
+    client = FakeNeo4jClient()
+    store = _schema_store(tmp_path)
+    service = EmbeddingService(
+        client=client,
+        schema_store=store,
+        text_backend=LocalSentenceEmbeddingBackend(dimensions=10),
+        graph_backend=Node2VecGraphEmbeddingBackend(dimensions=10, seed=11),
+    )
+
+    first_time = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    service.refresh_embeddings(seed=11, updated_at=first_time)
+    first_embedding = list(client.nodes["Person"]["p1"]["embedding_text"])
+    first_timestamp = client.nodes["Person"]["p1"]["embedding_updated_at"]
+
+    second_time = datetime(2024, 3, 2, tzinfo=timezone.utc)
+    service.refresh_embeddings(seed=11, updated_at=second_time)
+    assert client.nodes["Person"]["p1"]["embedding_text"] == first_embedding
+    assert client.nodes["Person"]["p1"]["embedding_updated_at"] == first_timestamp
+
+    client.nodes["Person"]["p1"]["title"] = "Senior Engineer"
+    third_time = datetime(2024, 3, 3, tzinfo=timezone.utc)
+    service.refresh_embeddings(seed=11, updated_at=third_time)
+
+    assert client.nodes["Person"]["p1"]["embedding_text"] != first_embedding
+    assert client.nodes["Person"]["p1"]["embedding_updated_at"] != first_timestamp
