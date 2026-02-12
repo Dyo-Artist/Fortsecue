@@ -11,6 +11,8 @@ input_fields:
   - project_id
   - stakeholder_id
   - reasoning_paths_json
+  - learned_weight_signals_json
+  - concept_assignments_json
 prompt_template: |
   You are LOGOS, a local-first governance analyst.
 
@@ -24,8 +26,16 @@ prompt_template: |
   Reasoning paths (JSON):
   {{ reasoning_paths_json }}
 
+  Learned path weight signals (JSON):
+  {{ learned_weight_signals_json }}
+
+  Updated concept assignments (JSON):
+  {{ concept_assignments_json }}
+
   Return plain text with:
   - risk explanation,
   - likely causes,
   - impacted stakeholders,
+  - explicit references to learned path weights,
+  - updated concept assignments that influence the explanation,
   - key assumptions and uncertainty.

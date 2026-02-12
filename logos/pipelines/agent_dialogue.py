@@ -106,6 +106,60 @@ def _safe_feedback_meta(bundle: Any, ctx: PipelineContext) -> InteractionMeta:
     return InteractionMeta(interaction_id=fallback_id, interaction_type="agent_dialogue")
 
 
+def _concept_assignments(reasoning_paths: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
+    assignments: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for path in reasoning_paths:
+        nodes = path.get("nodes") if isinstance(path.get("nodes"), Iterable) else []
+        for node in nodes:
+            if not isinstance(node, Mapping):
+                continue
+            node_id = str(node.get("id") or "").strip()
+            concept_id = str(node.get("concept_id") or node.get("concept") or "").strip()
+            concept_kind = str(node.get("concept_kind") or node.get("kind") or "").strip()
+            if not node_id or not concept_id:
+                continue
+            signature = (node_id, concept_id, concept_kind)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            assignments.append(
+                {
+                    "node_id": node_id,
+                    "concept_id": concept_id,
+                    "concept_kind": concept_kind,
+                }
+            )
+    return assignments
+
+
+def _learned_weight_signals(reasoning_paths: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    signals: list[dict[str, Any]] = []
+    for index, path in enumerate(reasoning_paths, start=1):
+        contributions = path.get("contributions") if isinstance(path.get("contributions"), Mapping) else {}
+        top_contributions = sorted(
+            (
+                (str(name), float(value))
+                for name, value in contributions.items()
+                if isinstance(value, (int, float))
+            ),
+            key=lambda item: abs(item[1]),
+            reverse=True,
+        )[:3]
+        signals.append(
+            {
+                "path_rank": index,
+                "score": float(path.get("score") or 0.0),
+                "policy_explanation": str(path.get("explanation") or ""),
+                "top_weighted_features": [
+                    {"feature": feature, "weighted_value": weighted_value}
+                    for feature, weighted_value in top_contributions
+                ],
+            }
+        )
+    return signals
+
+
 @STAGE_REGISTRY.register("A1_PARSE_QUERY")
 def stage_parse_query(bundle: Any, ctx: PipelineContext) -> Dict[str, Any]:
     context = ctx.to_mapping()
@@ -195,16 +249,24 @@ def stage_compose_response(bundle: Any, ctx: PipelineContext) -> Dict[str, Any]:
         "reasoning_paths_json": reasoning_paths,
     }
 
+    concept_assignments = _concept_assignments(reasoning_paths)
+    learned_weight_signals = _learned_weight_signals(reasoning_paths)
+    prompt_context["concept_assignments_json"] = concept_assignments
+    prompt_context["learned_weight_signals_json"] = learned_weight_signals
+
     try:
         agent_response = PROMPT_ENGINE.run_prompt(prompt_path, prompt_context)
     except PromptEngineError as exc:
-        logger.warning("agent_dialogue_prompt_failed", extra={"error": str(exc), "prompt": prompt_path})
-        agent_response = f"Unable to compose response from prompt '{prompt_path}'."
+        message = f"Prompt execution failed: {exc}"
+        logger.warning("agent_dialogue_prompt_failed", extra={"error": message, "prompt": prompt_path})
+        raise PromptEngineError(message) from exc
 
     return {
         **(dict(bundle) if isinstance(bundle, Mapping) else {}),
         "agent_response": agent_response,
         "reasoning": reasoning_paths,
+        "concept_assignments": concept_assignments,
+        "learned_weight_signals": learned_weight_signals,
         "rendered_prompt_path": prompt_path,
     }
 
@@ -231,6 +293,8 @@ def stage_capture_feedback(bundle: Any, ctx: PipelineContext) -> Dict[str, Any]:
     return {
         "agent_response": bundle.get("agent_response"),
         "reasoning": bundle.get("reasoning", []),
+        "concept_assignments": bundle.get("concept_assignments", []),
+        "learned_weight_signals": bundle.get("learned_weight_signals", []),
         "feedback_bundle": feedback.model_dump(),
     }
 

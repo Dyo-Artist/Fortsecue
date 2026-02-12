@@ -7,6 +7,8 @@ from typing import Any, Mapping
 import yaml
 from jinja2 import StrictUndefined, Template, TemplateError
 
+from logos.interfaces.ollama_client import OllamaError, call_llm
+
 
 class PromptEngineError(RuntimeError):
     """Raised when prompt loading, rendering, or execution fails."""
@@ -15,7 +17,8 @@ class PromptEngineError(RuntimeError):
 class PromptEngine:
     """Load, render, and execute knowledgebase prompt templates.
 
-    The execute method is currently a stub and returns rendered prompt text.
+    Prompt templates are rendered from the knowledgebase, then executed against
+    the local LLM backend.
     """
 
     def __init__(self, prompts_root: Path | None = None) -> None:
@@ -60,10 +63,10 @@ class PromptEngine:
             raise PromptEngineError(f"Failed to render prompt: {relative_prompt_path}") from exc
 
     def run_prompt(self, relative_prompt_path: str, context: Mapping[str, Any]) -> str:
-        """Stub execution path for prompt requests.
-
-        Returns the rendered prompt so pipeline wiring can be validated
-        before adding a concrete local LLM execution backend.
-        """
-
-        return self.render_prompt(relative_prompt_path, context)
+        prompt = self.render_prompt(relative_prompt_path, context)
+        try:
+            return call_llm(prompt).strip()
+        except OllamaError as exc:
+            raise PromptEngineError(
+                "Local LLM backend unavailable; prompt execution failed."
+            ) from exc
