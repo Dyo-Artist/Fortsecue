@@ -3,5 +3,4 @@
 __all__ = [
     "transcription",
     "sync",
-    "embeddings",
 ]
