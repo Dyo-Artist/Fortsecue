@@ -8,6 +8,7 @@ from typing import Any, Iterable, Mapping, Protocol
 
 from logos.graphio.neo4j_client import Neo4jClient, get_client
 from logos.graphio.schema_store import SchemaStore
+from logos.learning.embeddings.hash_utils import hash_graph_content, hash_text_content
 
 
 class TextEmbeddingBackend(Protocol):
@@ -136,6 +137,7 @@ class EmbeddingService:
             payload.sort(key=lambda item: item[0])
             vectors = self._text_backend.embed([item[2] for item in payload])
             for (node_id, props, _), vector in zip(payload, vectors, strict=False):
+                content_hash = hash_text_content(_select_text_fields(props))
                 if self._upsert_embedding(
                     label=label,
                     node_id=node_id,
@@ -143,6 +145,8 @@ class EmbeddingService:
                     embedding_field="embedding_text",
                     embedding=vector,
                     model_name=self._text_backend.model_name,
+                    model_version=self._text_backend.model_name,
+                    content_hash=content_hash,
                     now=now,
                 ):
                     updated += 1
@@ -167,6 +171,10 @@ class EmbeddingService:
             for row in edge_rows
             if row.get("src") and row.get("dst")
         ]
+        neighbours_by_id: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+        for src, dst in edges:
+            neighbours_by_id.setdefault(src, set()).add(dst)
+            neighbours_by_id.setdefault(dst, set()).add(src)
 
         graph_backend = self._graph_backend
         if isinstance(graph_backend, Node2VecGraphEmbeddingBackend):
@@ -182,6 +190,8 @@ class EmbeddingService:
                 embedding_field="embedding_graph",
                 embedding=embeddings[node_id],
                 model_name=graph_backend.model_name,
+                model_version=graph_backend.model_name,
+                content_hash=hash_graph_content(node_id=node_id, neighbours=sorted(neighbours_by_id.get(node_id, set()))),
                 now=now,
             ):
                 updated += 1
@@ -199,12 +209,15 @@ class EmbeddingService:
         embedding_field: str,
         embedding: list[float],
         model_name: str,
+        model_version: str,
+        content_hash: str,
         now: datetime,
     ) -> bool:
         model_field = f"{embedding_field}_model"
         existing = props.get(embedding_field)
-        existing_model = props.get(model_field) or props.get("embedding_model")
-        if existing == embedding and existing_model == model_name:
+        hash_field = f"{embedding_field}_content_hash"
+        existing_hash = props.get(hash_field) or props.get("content_hash")
+        if existing is not None and existing_hash == content_hash:
             return False
 
         self._client.run(
@@ -212,6 +225,9 @@ class EmbeddingService:
                 f"MATCH (n:{label} {{id: $id}}) "
                 f"SET n.{embedding_field} = $embedding, "
                 "n.embedding_model = $embedding_model, "
+                "n.embedding_model_version = $embedding_model_version, "
+                "n.content_hash = $content_hash, "
+                f"n.{hash_field} = $content_hash, "
                 "n.embedding_updated_at = datetime($embedding_updated_at), "
                 f"n.{model_field} = $embedding_model"
             ),
@@ -219,6 +235,8 @@ class EmbeddingService:
                 "id": node_id,
                 "embedding": embedding,
                 "embedding_model": model_name,
+                "embedding_model_version": model_version,
+                "content_hash": content_hash,
                 "embedding_updated_at": _to_iso(now),
             },
         )
