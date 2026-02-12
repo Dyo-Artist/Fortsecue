@@ -266,7 +266,11 @@ def stage_nlp_extract(bundle: Any, ctx: PipelineContext) -> Any:
 
 @STAGE_REGISTRY.register("normalise.resolve_entities")
 def stage_normalise(bundle: Any, ctx: PipelineContext) -> Any:
-    # Placeholder for contextual identity resolution; preserves bundle continuity.
+    context = ctx.to_mapping()
+    if isinstance(bundle, PreviewBundle):
+        return legacy_stages.resolve_entities_from_graph(bundle, context)
+    if isinstance(bundle, Mapping) and isinstance(bundle.get("interaction"), Mapping):
+        return legacy_stages.resolve_entities_from_graph(bundle, context)
     return bundle
 
 
@@ -306,14 +310,8 @@ def stage_commit_validate(bundle: Any, ctx: PipelineContext) -> Any:
 @STAGE_REGISTRY.register("graph.upsert")
 def stage_graph_upsert(bundle: Any, ctx: PipelineContext) -> Any:
     context = ctx.to_mapping()
-    resolved = legacy_stages.resolve_entities_from_graph(bundle, context)
-    interaction_bundle = legacy_stages.build_interaction_bundle_stage(resolved, context)
+    interaction_bundle = legacy_stages.build_interaction_bundle_stage(bundle, context)
     return legacy_stages.upsert_interaction_bundle_stage(interaction_bundle, context)
-
-
-@STAGE_REGISTRY.register("alerts.evaluate")
-def stage_alerts(bundle: Any, ctx: PipelineContext) -> Any:  # pragma: no cover - placeholder
-    return bundle
 
 
 @STAGE_REGISTRY.register("learn.capture_feedback")
@@ -334,7 +332,6 @@ __all__ = [
 ]
 
 # Register additional pipeline stages.
-from logos.pipelines import concept_update as _concept_update  # noqa: F401,E402
 from logos.pipelines import interaction_commit as _interaction_commit  # noqa: F401,E402
 from logos.pipelines import reasoning_alerts as _reasoning_alerts  # noqa: F401,E402
 from logos.pipelines import agent_dialogue as _agent_dialogue  # noqa: F401,E402

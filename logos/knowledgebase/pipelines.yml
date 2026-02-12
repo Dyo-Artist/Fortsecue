@@ -1,39 +1,30 @@
 metadata:
-  version: "0.1.1"
-  updated_at: "2026-02-09T00:00:00Z"
-  updated_by: "system"
-
+  version: 0.1.1
+  updated_at: '2026-02-09T00:00:00Z'
+  updated_by: system
 pipeline.interaction_ingest:
   stages:
-    - ingest.validate_input
-    - ingest.parse_or_transcribe
-    - nlp.extract
-    - normalise.resolve_entities
-    - preview.assemble
-
+  - ingest.validate_input
+  - ingest.parse_or_transcribe
+  - nlp.extract
+  - preview.assemble
 pipeline.interaction_commit:
   stages:
-    - commit.validate
-    - graph.upsert
-    - alerts.evaluate
-    - learn.capture_feedback
-    - S7_REFLECT_AND_LEARN
-
+  - commit.validate
+  - normalise.resolve_entities
+  - graph.upsert
+  - learn.capture_feedback
+  - S7_REFLECT_AND_LEARN
 pipeline.reasoning_alerts:
   stages:
-    - R1_COLLECT_TARGETS
-    - R2_COMPUTE_SCORES
-    - R3_APPLY_RULES_AND_MODELS
-    - R4_MATERIALISE_ALERTS
-
-pipeline.concept_update:
-  stages:
-    - concepts.update
-
+  - R1_COLLECT_TARGETS
+  - R2_COMPUTE_SCORES
+  - R3_APPLY_RULES_AND_MODELS
+  - R4_MATERIALISE_ALERTS
 pipeline.agent_dialogue:
   stages:
-    - A1_PARSE_QUERY
-    - A2_PLAN_DIALECTIC
-    - A3_QUERY_GRAPH
-    - A4_COMPOSE_RESPONSE
-    - A5_CAPTURE_FEEDBACK
+  - A1_PARSE_QUERY
+  - A2_PLAN_DIALECTIC
+  - A3_QUERY_GRAPH
+  - A4_COMPOSE_RESPONSE
+  - A5_CAPTURE_FEEDBACK

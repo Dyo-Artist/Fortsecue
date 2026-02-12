@@ -6,12 +6,21 @@ sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient
 
 from logos import main
+from logos.api.routes import alerts as alerts_route
 from logos.graphio import queries as graph_queries
 
 
 def test_api_v1_alerts_filters(monkeypatch):
     client = TestClient(main.app)
     captured: dict[str, object] = {}
+
+    pipeline_calls: list[str] = []
+
+    def fake_run_pipeline(name, payload, context):  # type: ignore[unused-argument]
+        pipeline_calls.append(name)
+        return payload
+
+    monkeypatch.setattr(alerts_route, "run_pipeline", fake_run_pipeline)
 
     def fake_list_alerts(
         *,
@@ -68,6 +77,7 @@ def test_api_v1_alerts_filters(monkeypatch):
         "page": 2,
         "page_size": 5,
     }
+    assert pipeline_calls == ["pipeline.reasoning_alerts"]
     assert response.json() == {
         "items": [
             {
