@@ -105,3 +105,62 @@ def test_incremental_retraining_not_triggered_when_new_samples_below_threshold(t
     loaded = load_or_train_and_persist_policy(run_query=fake_run_query, kb_store=store)
 
     assert loaded.version == "1.0.0"
+
+
+def test_reinforcement_dedup_ignores_timestamp_churn_for_same_alert(tmp_path: Path):
+    kb_root = tmp_path / "knowledgebase"
+    policy_path = kb_root / "models" / "reasoning_path_policy.yml"
+    _write_policy(policy_path, threshold=10)
+
+    runs = [
+        [
+            {
+                "alert_id": "alert-1",
+                "path_features": {"path_length": 3.0, "recency": 0.8},
+                "model_score": 0.72,
+                "outcome_label": "materialised",
+                "timestamp": "2026-02-01T00:00:00+00:00",
+            }
+        ],
+        [
+            {
+                "alert_id": "alert-1",
+                "path_features": {"path_length": 3.0, "recency": 0.8},
+                "model_score": 0.72,
+                "outcome_label": "materialised",
+                "timestamp": "2026-02-10T00:00:00+00:00",
+            }
+        ],
+    ]
+
+    idx = {"value": 0}
+
+    def fake_run_query(query: str, params):
+        if "RETURN a.id AS alert_id" in query:
+            rows = runs[min(idx["value"], len(runs) - 1)]
+            idx["value"] += 1
+            return rows
+        return []
+
+    store = KnowledgebaseStore(base_path=kb_root)
+    load_or_train_and_persist_policy(run_query=fake_run_query, kb_store=store)
+    load_or_train_and_persist_policy(run_query=fake_run_query, kb_store=store)
+
+    reinforcement_log = kb_root.parent / "data" / "reinforcement_log.jsonl"
+    lines = [json.loads(line) for line in reinforcement_log.read_text().splitlines() if line.strip()]
+    assert len(lines) == 1
+
+
+def test_retraining_query_does_not_depend_on_updated_at(tmp_path: Path):
+    captured: list[str] = []
+
+    def fake_run_query(query: str, params):
+        captured.append(query)
+        return []
+
+    kb_root = tmp_path / "knowledgebase"
+    _write_policy(kb_root / "models" / "reasoning_path_policy.yml", threshold=10)
+    load_or_train_and_persist_policy(run_query=fake_run_query, kb_store=KnowledgebaseStore(base_path=kb_root))
+
+    assert captured
+    assert "updated_at" not in captured[0]

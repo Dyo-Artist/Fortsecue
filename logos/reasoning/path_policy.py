@@ -97,7 +97,7 @@ def _build_sample_key(row: Mapping[str, Any]) -> str:
     outcome = _normalise_outcome(row.get("outcome_label") or row.get("outcome"))
     timestamp = _timestamp_to_iso(row.get("timestamp"))
     if alert_id:
-        return f"{alert_id}|{outcome}|{timestamp}"
+        return f"{alert_id}|{outcome}"
     features = row.get("path_features") if isinstance(row.get("path_features"), Mapping) else row.get("features")
     feature_keys = sorted(str(item) for item in features.keys()) if isinstance(features, Mapping) else []
     return f"anon|{outcome}|{timestamp}|{','.join(feature_keys)}"
@@ -480,7 +480,7 @@ def load_or_train_and_persist_policy(
                 "       a.path_features AS path_features, "
                 "       coalesce(a.model_score, a.risk_score, 0.0) AS model_score, "
                 "       a.outcome AS outcome_label, "
-                "       coalesce(a.outcome_at, a.updated_at, a.created_at) AS timestamp "
+                "       coalesce(a.outcome_at, a.created_at) AS timestamp "
                 "LIMIT 1000"
             ),
             {"outcomes": list(OUTCOMES)},
