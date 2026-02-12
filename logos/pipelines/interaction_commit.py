@@ -102,6 +102,7 @@ def _load_threshold_defaults(kb_store: KnowledgebaseStore) -> dict[str, float]:
 def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
     context = ctx.to_mapping()
     _trace(context, "S7_REFLECT_AND_LEARN")
+    logger.info("execution_trace.s7_learn_invocation request_id=%s", context.get("request_id") or context.get("interaction_id"))
 
     limit = int(context.get("feedback_recent_limit", 50) or 50)
     threshold = int(context.get("feedback_recurring_threshold", 2) or 2)

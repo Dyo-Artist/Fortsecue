@@ -118,6 +118,18 @@ class ConceptAssignmentEngine:
         elif runner_up and (best["score"] - runner_up["score"] <= settings.ambiguity_gap):
             status = "ambiguous"
 
+        decision_mode = "embedding_similarity" if best["embedding_similarity"] >= settings.embedding_similarity_threshold else "lexical_or_structural_fallback"
+        logger.info(
+            "execution_trace.concept_assignment_decision concept_key=%s source=%r canonical_id=%s status=%s mode=%s top_score=%.4f top_similarity=%.4f",
+            concept_key,
+            value,
+            best.get("id"),
+            status,
+            decision_mode,
+            float(best.get("score", 0.0)),
+            float(best.get("embedding_similarity", 0.0)),
+        )
+
         return {
             "source": value,
             "canonical_id": best.get("id") if status == "matched" else None,

@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import math
 import random
+import logging
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Protocol
 
 from logos.graphio.neo4j_client import Neo4jClient, get_client
 from logos.graphio.schema_store import SchemaStore
 from logos.learning.embeddings.hash_utils import hash_graph_content, hash_text_content
+
+logger = logging.getLogger(__name__)
 
 
 class TextEmbeddingBackend(Protocol):
@@ -239,6 +242,12 @@ class EmbeddingService:
                 "content_hash": content_hash,
                 "embedding_updated_at": _to_iso(now),
             },
+        )
+        logger.info(
+            "execution_trace.embed_generation_persist label=%s node_id=%s field=%s",
+            label,
+            node_id,
+            embedding_field,
         )
         return True
 

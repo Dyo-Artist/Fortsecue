@@ -441,6 +441,13 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             "overdue_commitments": float(overdue_commitments),
         }
         policy_feature_vector = _policy_feature_vector(entry)
+        logger.info(
+            "execution_trace.path_scoring_invocation entity_id=%s interactions=%d commitments=%d features=%s",
+            entry.get("entity_id"),
+            len(entry.get("interactions", [])),
+            len(entry.get("commitments", [])),
+            sorted(model_feature_vector.keys()),
+        )
         path_score = score_entity_path(
             model=path_model,
             features=model_feature_vector,
