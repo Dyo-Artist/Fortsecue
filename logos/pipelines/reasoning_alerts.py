@@ -12,6 +12,7 @@ from logos.core.pipeline_executor import PipelineContext, STAGE_REGISTRY
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.graphio.schema_store import SchemaStore
 from logos.knowledgebase.store import KnowledgebaseStore
+from logos.learning.reasoning.path_model import load_reasoning_path_model, score_entity_path
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +90,6 @@ def _load_alert_rules(context: Mapping[str, Any]) -> dict[str, Any]:
     return _load_rules_file(kb_store.base_path, "rules/alerts.yml")
 
 
-def _load_score_rules(context: Mapping[str, Any]) -> dict[str, Any]:
-    kb_path = context.get("knowledgebase_path")
-    kb_store = KnowledgebaseStore(base_path=kb_path) if kb_path else KnowledgebaseStore()
-    return _load_rules_file(kb_store.base_path, "rules/scores.yml")
-
-
 def _normalise_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -160,21 +155,6 @@ def _pick_primary_id(entity: Mapping[str, Any]) -> tuple[str | None, list[dict[s
         sorted_candidates = sorted(candidates, key=lambda item: item.get("confidence", 0.0), reverse=True)
         return str(sorted_candidates[0].get("id")), candidates
     return None, candidates
-
-
-def _score_weights(score_rules: Mapping[str, Any], score_type: str, category: str) -> dict[str, float]:
-    scores = score_rules.get(score_type) if isinstance(score_rules.get(score_type), Mapping) else {}
-    category_rules = scores.get(category) if isinstance(scores, Mapping) else {}
-    weights = category_rules.get("weights") if isinstance(category_rules.get("weights"), Mapping) else {}
-    parsed: dict[str, float] = {}
-    for key, value in weights.items():
-        if isinstance(value, Mapping):
-            weight = value.get("initial")
-        else:
-            weight = value
-        if isinstance(weight, (int, float)):
-            parsed[str(key)] = float(weight)
-    return parsed
 
 
 def _relationship_type(schema_store: SchemaStore, keywords: Sequence[str], fallback: str) -> str:
@@ -325,11 +305,9 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
     status_excluded = _extract_param(unresolved_rule, "status_excluded", ["done", "cancelled"]) or []
     status_excluded = [str(item).lower() for item in status_excluded if item]
 
-    score_rules = _load_score_rules(context)
-    weights = _score_weights(score_rules, "risk_scores", "stakeholder")
-    overdue_weight = float(weights.get("overdue_commitments", 0.4))
-    negative_weight = float(weights.get("negative_sentiment", 0.3))
-    issues_weight = float(weights.get("issues_and_risks", 0.3))
+    kb_path = context.get("knowledgebase_path")
+    kb_store = KnowledgebaseStore(base_path=kb_path) if kb_path else KnowledgebaseStore()
+    path_model = load_reasoning_path_model(kb_store=kb_store)
 
     entity_scores: dict[str, dict[str, Any]] = {}
 
@@ -404,9 +382,6 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
                 streak = 0
 
         interaction_count = len(interactions_sorted)
-        influence_score = entry.get("scores", {}).get("influence_score")
-        if influence_score is None:
-            influence_score = min(1.0, interaction_count / 10.0) if interaction_count else 0.0
 
         overdue_commitments = 0
         for commitment in entry.get("commitments", []):
@@ -418,18 +393,29 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             if due and due < datetime.now(timezone.utc):
                 overdue_commitments += 1
 
-        risk_score = (
-            overdue_weight * overdue_commitments
-            + negative_weight * negative_streak
-            + issues_weight * 0.0
+        feature_vector = {
+            "negative_sentiment_streak": float(negative_streak),
+            "interaction_count": float(interaction_count),
+            "overdue_commitments": float(overdue_commitments),
+        }
+        path_score = score_entity_path(
+            model=path_model,
+            features=feature_vector,
+            interactions=entry.get("interactions", []),
+            commitments=entry.get("commitments", []),
         )
 
         entry["scores"] = {
-            "risk_score": float(risk_score),
-            "influence_score": float(influence_score),
+            "risk_score": float(path_score.risk_score),
+            "influence_score": float(path_score.influence_score),
             "negative_sentiment_streak": int(negative_streak),
             "interaction_count": interaction_count,
             "overdue_commitments": overdue_commitments,
+            "feature_contributions": path_score.feature_contributions,
+            "path_breakdown": path_score.path_breakdown,
+            "explanation": path_score.explanation,
+            "model_version": path_score.model_version,
+            "model_trained": path_score.model_trained,
         }
 
     payload = dict(bundle)
