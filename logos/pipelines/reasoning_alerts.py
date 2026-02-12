@@ -13,6 +13,7 @@ from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.graphio.schema_store import SchemaStore
 from logos.knowledgebase.store import KnowledgebaseStore
 from logos.learning.reasoning.path_model import load_reasoning_path_model, score_entity_path
+from logos.reasoning.path_policy import extract_path_features
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,47 @@ def _extract_identity_candidates(entity: Mapping[str, Any]) -> list[dict[str, An
                 )
     return enriched
 
+
+
+
+def _policy_feature_vector(entry: Mapping[str, Any]) -> dict[str, float]:
+    interactions = entry.get("interactions") if isinstance(entry.get("interactions"), list) else []
+    commitments = entry.get("commitments") if isinstance(entry.get("commitments"), list) else []
+
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    for interaction in interactions:
+        if not isinstance(interaction, Mapping):
+            continue
+        node: dict[str, Any] = {}
+        sentiment = _sentiment_value(interaction)
+        if sentiment is not None:
+            node["sentiment_score"] = sentiment
+        influence = interaction.get("influence_centrality", interaction.get("influence_score"))
+        if isinstance(influence, (int, float)):
+            node["influence_centrality"] = float(influence)
+        if node:
+            nodes.append(node)
+
+        timestamp = _normalise_datetime(interaction.get("interaction_time") or interaction.get("at") or interaction.get("created_at"))
+        edge_props = {"timestamp": timestamp.isoformat() if timestamp else datetime.now(timezone.utc).isoformat()}
+        edges.append({"rel": "INTERACTION", "props": edge_props})
+
+    for commitment in commitments:
+        if not isinstance(commitment, Mapping):
+            continue
+        node: dict[str, Any] = {}
+        due = _normalise_datetime(commitment.get("due_date"))
+        if due is not None:
+            node["due_date"] = due.isoformat()
+        if node:
+            nodes.append(node)
+
+        edge_props = {"timestamp": due.isoformat() if due else datetime.now(timezone.utc).isoformat()}
+        edges.append({"rel": "COMMITMENT", "props": edge_props})
+
+    return extract_path_features(nodes=nodes, edges=edges)
 
 def _pick_primary_id(entity: Mapping[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
     primary = entity.get("id")
@@ -393,14 +435,15 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             if due and due < datetime.now(timezone.utc):
                 overdue_commitments += 1
 
-        feature_vector = {
+        model_feature_vector = {
             "negative_sentiment_streak": float(negative_streak),
             "interaction_count": float(interaction_count),
             "overdue_commitments": float(overdue_commitments),
         }
+        policy_feature_vector = _policy_feature_vector(entry)
         path_score = score_entity_path(
             model=path_model,
-            features=feature_vector,
+            features=model_feature_vector,
             interactions=entry.get("interactions", []),
             commitments=entry.get("commitments", []),
         )
@@ -416,6 +459,8 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             "explanation": path_score.explanation,
             "model_version": path_score.model_version,
             "model_trained": path_score.model_trained,
+            "path_features": policy_feature_vector,
+            "model_score": float(path_score.risk_score),
         }
 
     payload = dict(bundle)
@@ -487,6 +532,8 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                 entity_ids.append(str(commitment.get("id")))
 
             for entity_id in entity_ids or []:
+                entry = scores.get(entity_id) if isinstance(scores, Mapping) else {}
+                score_block = entry.get("scores") if isinstance(entry, Mapping) and isinstance(entry.get("scores"), Mapping) else {}
                 alert_id = _alert_id("unresolved_commitment", entity_id, str(commitment.get("id")))
                 alerts.append(
                     {
@@ -500,6 +547,9 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                         "summary": commitment.get("text") or commitment.get("name"),
                         "due_date": due_date.isoformat(),
                         "age_days": age,
+                        "path_features": (score_block.get("path_features") if isinstance(score_block, Mapping) else None),
+                        "model_score": (score_block.get("model_score") if isinstance(score_block, Mapping) else score_block.get("risk_score") if isinstance(score_block, Mapping) else None),
+                        "model_version": (score_block.get("model_version") if isinstance(score_block, Mapping) else None),
                         "provenance": {
                             "pipeline": "pipeline.reasoning_alerts",
                             "rule": "unresolved_commitment",
@@ -530,6 +580,9 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                     "window_days": window_days,
                     "risk_score": score_block.get("risk_score"),
                     "influence_score": score_block.get("influence_score"),
+                    "path_features": score_block.get("path_features"),
+                    "model_score": score_block.get("model_score", score_block.get("risk_score")),
+                    "model_version": score_block.get("model_version"),
                     "provenance": {
                         "pipeline": "pipeline.reasoning_alerts",
                         "rule": "sentiment_drop",
@@ -592,6 +645,9 @@ def materialise_alerts(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[
                 "due_date": alert.get("due_date"),
                 "age_days": alert.get("age_days"),
                 "entity_candidates": alert.get("entity_candidates"),
+                "path_features": alert.get("path_features"),
+                "model_score": alert.get("model_score", alert.get("risk_score")),
+                "model_version": alert.get("model_version"),
                 "updated_at": now.isoformat(),
             }
             if "created_at" not in props:

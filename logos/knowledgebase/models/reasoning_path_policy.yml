@@ -1,11 +1,11 @@
 reasoning_policy:
   id: reasoning_path_scoring
   version: 1.0.0
-  trained_at: "1970-01-01T00:00:00+00:00"
+  trained_at: '1970-01-01T00:00:00+00:00'
   outcomes:
-    - acknowledged
-    - materialised
-    - false_positive
+  - acknowledged
+  - materialised
+  - false_positive
   intercepts:
     acknowledged: 0.0
     materialised: 0.0
@@ -29,5 +29,10 @@ reasoning_policy:
       sentiment_slope: 0.0
       commitment_age: 0.0
       influence_centrality: 0.0
+  retraining:
+    incremental_threshold: 25
+    reinforcement_log: data/reinforcement_log.jsonl
+    max_archive_entries: 25
+  coefficient_archive: []
 metadata:
   version: 0.0.0

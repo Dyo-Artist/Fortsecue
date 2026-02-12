@@ -76,3 +76,6 @@ def test_compute_scores_explanation_contains_feature_contributions_and_path_brea
     assert entry["feature_contributions"]
     assert isinstance(entry["path_breakdown"], list)
     assert {item["path_segment"] for item in entry["path_breakdown"]} == {"interactions", "commitments"}
+    assert "path_length" in entry["path_features"]
+    assert "recency" in entry["path_features"]
+    assert entry["model_score"] == entry["risk_score"]

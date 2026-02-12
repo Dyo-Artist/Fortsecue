@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import json
 from math import exp
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from logos.graphio.neo4j_client import GraphUnavailable
@@ -11,6 +13,7 @@ from logos.knowledgebase.store import KnowledgebaseStore
 POLICY_ID = "reasoning_path_scoring"
 POLICY_VERSION = "1.0.0"
 POLICY_KB_PATH = "models/reasoning_path_policy.yml"
+REINFORCEMENT_LOG_REL_PATH = "data/reinforcement_log.jsonl"
 OUTCOMES = ("acknowledged", "materialised", "false_positive")
 FEATURE_KEYS = (
     "path_length",
@@ -29,6 +32,113 @@ class ReasoningPathPolicy:
     outcomes: tuple[str, ...]
     coefficients: dict[str, dict[str, float]]
     intercepts: dict[str, float]
+
+
+def _normalise_outcome(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _version_tuple(version: str) -> tuple[int, int, int]:
+    try:
+        major, minor, patch = [int(part) for part in str(version).split(".")]
+        return major, minor, patch
+    except (TypeError, ValueError):
+        return (1, 0, 0)
+
+
+def _next_version(version: str) -> str:
+    major, minor, patch = _version_tuple(version)
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def _timestamp_to_iso(value: Any) -> str:
+    parsed = _normalise_timestamp(value)
+    if parsed is None:
+        return datetime.now(timezone.utc).isoformat()
+    return parsed.isoformat()
+
+
+def _retraining_config(store: KnowledgebaseStore) -> dict[str, Any]:
+    payload = store.read_yaml_file(POLICY_KB_PATH)
+    policy_block = payload.get("reasoning_policy") if isinstance(payload, Mapping) else {}
+    retraining = policy_block.get("retraining") if isinstance(policy_block, Mapping) else {}
+    if not isinstance(retraining, Mapping):
+        return {}
+    return dict(retraining)
+
+
+def _reinforcement_log_path(store: KnowledgebaseStore, retraining_cfg: Mapping[str, Any]) -> Path:
+    configured = retraining_cfg.get("reinforcement_log")
+    rel_path = str(configured) if isinstance(configured, str) and configured.strip() else REINFORCEMENT_LOG_REL_PATH
+    return store.base_path.parent / rel_path
+
+
+def _existing_reinforcement_keys(path: Path) -> set[str]:
+    keys: set[str] = set()
+    if not path.exists():
+        return keys
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            key = payload.get("sample_key")
+            if isinstance(key, str):
+                keys.add(key)
+    return keys
+
+
+def _build_sample_key(row: Mapping[str, Any]) -> str:
+    alert_id = str(row.get("alert_id") or "")
+    outcome = _normalise_outcome(row.get("outcome_label") or row.get("outcome"))
+    timestamp = _timestamp_to_iso(row.get("timestamp"))
+    if alert_id:
+        return f"{alert_id}|{outcome}"
+    features = row.get("path_features") if isinstance(row.get("path_features"), Mapping) else row.get("features")
+    feature_keys = sorted(str(item) for item in features.keys()) if isinstance(features, Mapping) else []
+    return f"anon|{outcome}|{timestamp}|{','.join(feature_keys)}"
+
+
+def sync_reinforcement_log(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    kb_store: KnowledgebaseStore,
+    retraining_cfg: Mapping[str, Any],
+) -> int:
+    path = _reinforcement_log_path(kb_store, retraining_cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _existing_reinforcement_keys(path)
+    appended = 0
+
+    with path.open("a", encoding="utf-8") as handle:
+        for row in rows:
+            features = row.get("path_features") if isinstance(row.get("path_features"), Mapping) else row.get("features")
+            if not isinstance(features, Mapping):
+                continue
+            outcome = _normalise_outcome(row.get("outcome_label") or row.get("outcome"))
+            if outcome not in OUTCOMES:
+                continue
+            sample_key = _build_sample_key(row)
+            if sample_key in existing:
+                continue
+
+            payload = {
+                "sample_key": sample_key,
+                "alert_id": row.get("alert_id"),
+                "path_features": {str(key): _feature_value(features, str(key)) for key in features.keys()},
+                "model_score": _feature_value(row, "model_score"),
+                "outcome_label": outcome,
+                "timestamp": _timestamp_to_iso(row.get("timestamp")),
+            }
+            handle.write(json.dumps(payload, sort_keys=True) + "\n")
+            existing.add(sample_key)
+            appended += 1
+
+    return appended
 
 
 
@@ -181,10 +291,12 @@ def train_reasoning_policy(
     samples: list[dict[str, float]] = []
     labels: list[str] = []
     for row in labelled_rows:
-        outcome = str(row.get("outcome") or "").lower()
+        outcome = _normalise_outcome(row.get("outcome_label") or row.get("outcome"))
         if outcome not in OUTCOMES:
             continue
-        features = row.get("features") if isinstance(row.get("features"), Mapping) else None
+        features = row.get("path_features") if isinstance(row.get("path_features"), Mapping) else None
+        if features is None:
+            features = row.get("features") if isinstance(row.get("features"), Mapping) else None
         if features is None:
             nodes = row.get("nodes") if isinstance(row.get("nodes"), Sequence) else []
             edges = row.get("edges") if isinstance(row.get("edges"), Sequence) else []
@@ -240,9 +352,29 @@ def persist_reasoning_policy(
     *,
     kb_store: KnowledgebaseStore | None = None,
     graph_run: Callable[[str, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+    archive_entry: Mapping[str, Any] | None = None,
 ) -> None:
     store = kb_store or KnowledgebaseStore()
-    store.update_yaml_file(POLICY_KB_PATH, _policy_payload(policy), reason="Updated reasoning path scoring policy")
+    current_payload = store.read_yaml_file(POLICY_KB_PATH)
+    next_payload = _policy_payload(policy)
+    current_policy = current_payload.get("reasoning_policy") if isinstance(current_payload, Mapping) else {}
+    if isinstance(current_policy, Mapping):
+        for key in ("retraining", "coefficient_archive"):
+            if key in current_policy and key not in next_payload["reasoning_policy"]:
+                next_payload["reasoning_policy"][key] = current_policy.get(key)
+    if archive_entry:
+        archive = next_payload["reasoning_policy"].get("coefficient_archive")
+        history = list(archive) if isinstance(archive, list) else []
+        history.append(dict(archive_entry))
+        max_archive = 25
+        retraining = next_payload["reasoning_policy"].get("retraining")
+        if isinstance(retraining, Mapping):
+            cfg_max = retraining.get("max_archive_entries")
+            if isinstance(cfg_max, int) and cfg_max > 0:
+                max_archive = cfg_max
+        next_payload["reasoning_policy"]["coefficient_archive"] = history[-max_archive:]
+
+    store.update_yaml_file(POLICY_KB_PATH, next_payload, reason="Updated reasoning path scoring policy")
 
     if graph_run is None:
         return
@@ -334,9 +466,8 @@ def load_or_train_and_persist_policy(
     kb_store: KnowledgebaseStore | None = None,
 ) -> ReasoningPathPolicy:
     store = kb_store or KnowledgebaseStore()
+    retraining_cfg = _retraining_config(store)
     loaded = load_reasoning_policy(kb_store=store)
-    if loaded.coefficients.get("materialised"):
-        return loaded
 
     try:
         rows = run_query(
@@ -345,7 +476,11 @@ def load_or_train_and_persist_policy(
                 "WHERE any(label IN labels(a) WHERE toLower(label) CONTAINS 'alert') "
                 "AND a.outcome IN $outcomes "
                 "AND a.path_features IS NOT NULL "
-                "RETURN a.path_features AS features, a.outcome AS outcome "
+                "RETURN a.id AS alert_id, "
+                "       a.path_features AS path_features, "
+                "       coalesce(a.model_score, a.risk_score, 0.0) AS model_score, "
+                "       a.outcome AS outcome_label, "
+                "       coalesce(a.outcome_at, a.created_at) AS timestamp "
                 "LIMIT 1000"
             ),
             {"outcomes": list(OUTCOMES)},
@@ -354,9 +489,26 @@ def load_or_train_and_persist_policy(
         rows = []
 
     labelled = [row for row in rows if isinstance(row, Mapping)]
+    new_samples = sync_reinforcement_log(labelled, kb_store=store, retraining_cfg=retraining_cfg)
+
+    threshold = retraining_cfg.get("incremental_threshold", 25)
+    if not isinstance(threshold, int) or threshold <= 0:
+        threshold = 25
+
+    if loaded.coefficients.get("materialised") and new_samples < threshold:
+        return loaded
+
     if not labelled:
         return loaded
 
-    trained = train_reasoning_policy(labelled)
-    persist_reasoning_policy(trained, kb_store=store, graph_run=run_query)
+    next_version = _next_version(loaded.version)
+    trained = train_reasoning_policy(labelled, version=next_version)
+    archive_entry = {
+        "version": loaded.version,
+        "trained_at": loaded.trained_at,
+        "archived_at": datetime.now(timezone.utc).isoformat(),
+        "intercepts": loaded.intercepts,
+        "coefficients": loaded.coefficients,
+    }
+    persist_reasoning_policy(trained, kb_store=store, graph_run=run_query, archive_entry=archive_entry)
     return trained
