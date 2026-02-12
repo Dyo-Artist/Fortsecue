@@ -41,7 +41,7 @@ def test_taxonomy_normalises_hints_and_scores_matches():
     assert stakeholder_result["canonical_id"] == "st_internal_sponsor"
     assert stakeholder_result["status"] == "matched"
     assert person.get("type") == "st_internal_sponsor"
-    assert stakeholder_result.get("score", 0) > 0.9
+    assert stakeholder_result.get("score", 0) >= stakeholder_result.get("decision_threshold", 0.6)
 
     org = normalised["entities"]["orgs"][0]
     org_result = org.get("hint_resolution", {}).get("stakeholder_types")
@@ -52,5 +52,5 @@ def test_taxonomy_normalises_hints_and_scores_matches():
     risk_result = risk.get("hint_resolution", {}).get("risk_categories")
     assert risk_result
     assert risk_result["canonical_id"] == "rc_commercial"
-    assert risk_result["score"] >= 0.75
+    assert risk_result["score"] >= risk_result.get("decision_threshold", 0.6)
 

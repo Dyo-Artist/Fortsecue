@@ -3,36 +3,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import yaml
 
+from logos.learning.embeddings.concept_assignment import ConceptAssignmentEngine, ConceptAssignmentSettings
+
 DEFAULT_KB_PATH = Path(__file__).resolve().parent.parent / "knowledgebase"
 DEFAULT_DOMAIN_PROFILE = DEFAULT_KB_PATH / "domain_profiles" / "stakeholder_engagement.yml"
-
-
-def _normalise_text(value: str | None) -> str | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        value = str(value)
-    return value.strip().lower() or None
-
-
-def _similarity_ratio(left: Any, right: Any) -> float:
-    left_norm = _normalise_text(left)
-    right_norm = _normalise_text(right)
-    if left_norm is None or right_norm is None:
-        return 0.0
-    return SequenceMatcher(None, left_norm, right_norm).ratio()
-
-
-def _threshold_for(thresholds: Mapping[str, Any], category: str, key: str, default: float) -> float:
-    defaults = thresholds.get("defaults", {}) if isinstance(thresholds.get("defaults"), dict) else {}
-    section = thresholds.get(category, {}) if isinstance(thresholds.get(category), dict) else {}
-    return float(section.get(key, defaults.get(key, default)))
 
 
 class TaxonomyConfigError(RuntimeError):
@@ -70,7 +49,7 @@ def _load_concept_entries(concept_key: str, *, domain_profile_path: Path = DEFAU
 
 
 class TaxonomyNormaliser:
-    """Resolve hint strings to concept IDs using deterministic and fuzzy matching."""
+    """Resolve hint strings to concept IDs using embedding-first matching."""
 
     def __init__(
         self,
@@ -81,6 +60,7 @@ class TaxonomyNormaliser:
         self.domain_profile_path = domain_profile_path
         self.thresholds = thresholds or {}
         self._concept_cache: dict[str, list[dict[str, Any]]] = {}
+        self._assignment_engines: dict[str, ConceptAssignmentEngine] = {}
 
     def _concepts(self, concept_key: str) -> list[dict[str, Any]]:
         if concept_key not in self._concept_cache:
@@ -89,71 +69,30 @@ class TaxonomyNormaliser:
             )
         return self._concept_cache[concept_key]
 
-    def _score_concept(self, value: str, entry: Mapping[str, Any], threshold: float) -> tuple[float, str]:
-        value_norm = _normalise_text(value) or ""
-        entry_id = _normalise_text(entry.get("id")) or ""
-        entry_name = _normalise_text(entry.get("name")) or entry_id
-        aliases = entry.get("aliases") if isinstance(entry.get("aliases"), (list, tuple, set)) else []
-        alias_norm = {_normalise_text(alias) for alias in aliases if _normalise_text(alias)}
+    def _assignment_engine(self, concept_key: str) -> ConceptAssignmentEngine:
+        if concept_key not in self._assignment_engines:
+            settings = ConceptAssignmentSettings.from_thresholds(self.thresholds, concept_key)
+            self._assignment_engines[concept_key] = ConceptAssignmentEngine(settings)
+        return self._assignment_engines[concept_key]
 
-        if value_norm and value_norm == entry_id:
-            return 1.0, "id"
-        if value_norm and value_norm == entry_name:
-            return 0.98, "name"
-        if value_norm and value_norm in alias_norm:
-            return 0.96, "alias"
-
-        similarity = _similarity_ratio(value_norm, entry_name)
-        if similarity >= threshold:
-            return similarity, "fuzzy"
-
-        return 0.0, "none"
-
-    def resolve(self, concept_key: str, value: str | None) -> dict[str, Any] | None:
+    def resolve(
+        self,
+        concept_key: str,
+        value: str | None,
+        *,
+        context: Mapping[str, Any] | None = None,
+        value_embedding: Sequence[float] | None = None,
+    ) -> dict[str, Any] | None:
         if not value:
             return None
-        candidates: list[dict[str, Any]] = []
-        threshold = _threshold_for(self.thresholds, concept_key, "concept_similarity", 0.75)
-        ambiguity_gap = _threshold_for(self.thresholds, concept_key, "ambiguity_gap", 0.1)
-
-        for entry in self._concepts(concept_key):
-            score, match_type = self._score_concept(value, entry, threshold)
-            if score <= 0:
-                continue
-            candidates.append(
-                {
-                    "id": entry.get("id"),
-                    "name": entry.get("name"),
-                    "score": float(score),
-                    "match_type": match_type,
-                }
-            )
-
-        if not candidates:
-            return {
-                "source": value,
-                "canonical_id": None,
-                "name": None,
-                "score": 0.0,
-                "status": "unmatched",
-                "candidates": [],
-            }
-
-        candidates.sort(key=lambda item: item.get("score", 0.0), reverse=True)
-        best = candidates[0]
-        second_score = candidates[1].get("score", 0.0) if len(candidates) > 1 else 0.0
-        status = "matched" if best.get("score", 0.0) > 0 else "unmatched"
-        if best.get("score", 0.0) - second_score <= ambiguity_gap and len(candidates) > 1:
-            status = "ambiguous"
-
-        return {
-            "source": value,
-            "canonical_id": best.get("id") if status == "matched" else None,
-            "name": best.get("name") if status == "matched" else None,
-            "score": float(best.get("score", 0.0)),
-            "status": status,
-            "candidates": candidates,
-        }
+        engine = self._assignment_engine(concept_key)
+        return engine.assign(
+            concept_key=concept_key,
+            value=value,
+            candidates=self._concepts(concept_key),
+            context=context,
+            value_embedding=value_embedding,
+        )
 
     def _apply_to_entity(
         self,
@@ -164,7 +103,12 @@ class TaxonomyNormaliser:
         target_field: str,
     ) -> dict[str, Any]:
         updated = dict(entity)
-        result = self.resolve(concept_key, hint_value)
+        result = self.resolve(
+            concept_key,
+            hint_value,
+            context={"entity_type": updated.get("type") or updated.get("kind")},
+            value_embedding=updated.get("embedding"),
+        )
         if not result:
             return updated
 
@@ -210,4 +154,3 @@ class TaxonomyNormaliser:
 
         updated_preview["entities"] = entities
         return updated_preview
-
