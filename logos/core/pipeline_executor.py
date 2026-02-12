@@ -12,9 +12,11 @@ from pydantic import BaseModel
 
 from logos.ingest import doc_ingest, note_ingest
 from logos.core.ontology_guard import OntologyIntegrityGuard
+from logos.feedback.store import append_feedback
 from logos.interfaces.local_asr_stub import TranscriptionFailure
 from logos.models.bundles import (
     ExtractionBundle,
+    FeedbackBundle,
     InteractionMeta,
     PipelineBundle,
     PreviewBundle,
@@ -320,6 +322,12 @@ def stage_graph_upsert(bundle: Any, ctx: PipelineContext) -> Any:
 @STAGE_REGISTRY.register("learn.capture_feedback")
 def stage_feedback(bundle: Any, ctx: PipelineContext) -> Any:
     context = ctx.to_mapping()
+    feedback_payload = context.get("feedback_bundle")
+    if isinstance(feedback_payload, FeedbackBundle):
+        append_feedback(feedback_payload, base_dir=context.get("feedback_dir"))
+    elif isinstance(feedback_payload, Mapping):
+        feedback_bundle = FeedbackBundle.model_validate(feedback_payload)
+        append_feedback(feedback_bundle, base_dir=context.get("feedback_dir"))
     return legacy_stages.persist_session_memory(bundle, context)
 
 

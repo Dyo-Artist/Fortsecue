@@ -12,6 +12,7 @@ import yaml
 from logos.core.pipeline_executor import PipelineContext, STAGE_REGISTRY
 from logos.feedback.store import DEFAULT_FEEDBACK_DIR
 from logos.knowledgebase.store import KnowledgebaseStore
+from logos.models.bundles import FeedbackBundle
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,20 @@ def _load_recent_feedback(path: Path, limit: int) -> list[dict[str, Any]]:
             if isinstance(payload, Mapping):
                 entries.append(dict(payload))
     return list(entries)
+
+
+def _entry_from_feedback_bundle(bundle: FeedbackBundle) -> dict[str, Any]:
+    payload = bundle.model_dump(mode="json", exclude_none=True)
+    entry = {
+        "interaction_id": bundle.meta.interaction_id,
+        "user_id": bundle.user_id,
+        "feedback": bundle.feedback,
+        "rating": bundle.rating,
+        "corrections": bundle.corrections,
+    }
+    if "timestamp" in payload:
+        entry["timestamp"] = payload["timestamp"]
+    return entry
 
 
 def _iter_corrections(entries: Iterable[Mapping[str, Any]]) -> Iterable[dict[str, Any]]:
@@ -94,6 +109,15 @@ def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
     feedback_path = feedback_dir / "feedback.jsonl"
 
     entries = _load_recent_feedback(feedback_path, limit)
+    feedback_payload = context.get("feedback_bundle")
+    if isinstance(feedback_payload, FeedbackBundle):
+        entries.append(_entry_from_feedback_bundle(feedback_payload))
+    elif isinstance(feedback_payload, Mapping):
+        feedback_bundle = FeedbackBundle.model_validate(feedback_payload)
+        entries.append(_entry_from_feedback_bundle(feedback_bundle))
+
+    if len(entries) > limit:
+        entries = entries[-limit:]
     if not entries:
         logger.info("reflect_and_learn_no_feedback", extra={"stage": "S7_REFLECT_AND_LEARN"})
         return bundle
@@ -149,6 +173,10 @@ def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
         "concept_promotions": [],
         "review_items": [],
     }
+    deltas: dict[str, Any] = {
+        "correction_count_by_path": dict(correction_counts),
+        "confidence_delta_count": len(confidence_deltas),
+    }
 
     for phrase, count in obligation_candidates.items():
         if count >= threshold:
@@ -175,15 +203,20 @@ def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
 
     if confidence_deltas and len(confidence_deltas) >= threshold:
         avg_delta = mean(confidence_deltas)
-        defaults = _load_threshold_defaults(kb_store)
-        if defaults:
+        defaults_before = _load_threshold_defaults(kb_store)
+        if defaults_before:
             delta = 0.01 if avg_delta < 0 else -0.01
-            adjustments = {key: delta for key in defaults.keys()}
+            adjustments = {key: delta for key in defaults_before.keys()}
             applied = kb_store.update_merge_thresholds(
                 adjustments,
                 scope="defaults",
                 reason="Feedback-driven confidence adjustment",
             )
+            defaults_after = _load_threshold_defaults(kb_store)
+            deltas["threshold_defaults"] = {
+                key: {"before": defaults_before.get(key), "after": defaults_after.get(key)}
+                for key in defaults_before.keys()
+            }
             for key, value in applied.items():
                 updates["threshold_updates"].append(f"{key}={value:.2f}")
             if applied:
@@ -213,6 +246,8 @@ def stage_reflect_and_learn(bundle: Any, ctx: PipelineContext) -> Any:
             logger.info("reflect_review_logged", extra={"item": item})
 
     context["learning_updates"] = updates
+    context["learning_deltas"] = deltas
+    logger.info("reflect_and_learn_delta", extra={"deltas": deltas, "stage": "S7_REFLECT_AND_LEARN"})
     logger.info(
         "reflect_and_learn_completed",
         extra={"updates": updates, "total_feedback": len(entries)},
