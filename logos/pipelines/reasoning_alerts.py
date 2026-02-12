@@ -416,6 +416,8 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             "explanation": path_score.explanation,
             "model_version": path_score.model_version,
             "model_trained": path_score.model_trained,
+            "path_features": feature_vector,
+            "model_score": float(path_score.risk_score),
         }
 
     payload = dict(bundle)
@@ -487,6 +489,8 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                 entity_ids.append(str(commitment.get("id")))
 
             for entity_id in entity_ids or []:
+                entry = scores.get(entity_id) if isinstance(scores, Mapping) else {}
+                score_block = entry.get("scores") if isinstance(entry, Mapping) and isinstance(entry.get("scores"), Mapping) else {}
                 alert_id = _alert_id("unresolved_commitment", entity_id, str(commitment.get("id")))
                 alerts.append(
                     {
@@ -500,6 +504,9 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                         "summary": commitment.get("text") or commitment.get("name"),
                         "due_date": due_date.isoformat(),
                         "age_days": age,
+                        "path_features": (score_block.get("path_features") if isinstance(score_block, Mapping) else None),
+                        "model_score": (score_block.get("model_score") if isinstance(score_block, Mapping) else score_block.get("risk_score") if isinstance(score_block, Mapping) else None),
+                        "model_version": (score_block.get("model_version") if isinstance(score_block, Mapping) else None),
                         "provenance": {
                             "pipeline": "pipeline.reasoning_alerts",
                             "rule": "unresolved_commitment",
@@ -530,6 +537,9 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
                     "window_days": window_days,
                     "risk_score": score_block.get("risk_score"),
                     "influence_score": score_block.get("influence_score"),
+                    "path_features": score_block.get("path_features"),
+                    "model_score": score_block.get("model_score", score_block.get("risk_score")),
+                    "model_version": score_block.get("model_version"),
                     "provenance": {
                         "pipeline": "pipeline.reasoning_alerts",
                         "rule": "sentiment_drop",
@@ -592,6 +602,9 @@ def materialise_alerts(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[
                 "due_date": alert.get("due_date"),
                 "age_days": alert.get("age_days"),
                 "entity_candidates": alert.get("entity_candidates"),
+                "path_features": alert.get("path_features"),
+                "model_score": alert.get("model_score", alert.get("risk_score")),
+                "model_version": alert.get("model_version"),
                 "updated_at": now.isoformat(),
             }
             if "created_at" not in props:
