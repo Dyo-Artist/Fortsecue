@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from math import ceil
 from typing import Any, Iterable, Mapping, Sequence
+
+from logos.reasoning.path_policy import evaluate_policy, extract_path_features, load_or_train_and_persist_policy
 
 from .neo4j_client import run_query
 from .schema_store import SchemaStore
+
+
+_REASONING_POLICY_CACHE = None
 
 
 def _normalize_label(value: str) -> str:
@@ -416,6 +420,14 @@ def list_alerts(
     return alerts, total
 
 
+
+def _reasoning_policy():
+    global _REASONING_POLICY_CACHE
+    if _REASONING_POLICY_CACHE is None:
+        _REASONING_POLICY_CACHE = load_or_train_and_persist_policy(run_query=run_query)
+    return _REASONING_POLICY_CACHE
+
+
 def get_reasoning_paths(
     *,
     stakeholder_id: str | None = None,
@@ -477,31 +489,20 @@ def get_reasoning_paths(
             },
         )
     )
+    policy = _reasoning_policy()
     scored: list[dict[str, Any]] = []
     for row in rows:
+        nodes = row.get("nodes", []) or []
         edges = row.get("edges", []) or []
-        score = 0.0
-        recency_scores: list[float] = []
-        rel_summary: list[str] = []
-        for edge in edges:
-            rel_type = str(edge.get("rel") or "")
-            props = edge.get("props") or {}
-            weight = _edge_weight(rel_type)
-            recency = _recency_factor(props)
-            score += weight * recency
-            recency_scores.append(recency)
-            if rel_type:
-                rel_summary.append(rel_type)
-        average_recency = sum(recency_scores) / len(recency_scores) if recency_scores else 0.0
-        explanation = (
-            f"Path score {score:.2f} from edges [{', '.join(rel_summary)}] "
-            f"with average recency {average_recency:.2f}."
-        )
+        features = extract_path_features(nodes=nodes, edges=edges)
+        score, explanation, contributions = evaluate_policy(policy, features)
         scored.append(
             {
-                "nodes": row.get("nodes", []),
+                "nodes": nodes,
                 "edges": edges,
                 "score": score,
+                "features": features,
+                "contributions": contributions,
                 "explanation": explanation,
             }
         )
