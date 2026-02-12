@@ -1,0 +1,33 @@
+reasoning_policy:
+  id: reasoning_path_scoring
+  version: 1.0.0
+  trained_at: "1970-01-01T00:00:00+00:00"
+  outcomes:
+    - acknowledged
+    - materialised
+    - false_positive
+  intercepts:
+    acknowledged: 0.0
+    materialised: 0.0
+    false_positive: 0.0
+  coefficients:
+    acknowledged:
+      path_length: 0.0
+      recency: 0.0
+      sentiment_slope: 0.0
+      commitment_age: 0.0
+      influence_centrality: 0.0
+    materialised:
+      path_length: 0.0
+      recency: 0.0
+      sentiment_slope: 0.0
+      commitment_age: 0.0
+      influence_centrality: 0.0
+    false_positive:
+      path_length: 0.0
+      recency: 0.0
+      sentiment_slope: 0.0
+      commitment_age: 0.0
+      influence_centrality: 0.0
+metadata:
+  version: 0.0.0

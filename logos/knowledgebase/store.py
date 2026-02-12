@@ -531,6 +531,38 @@ class KnowledgebaseStore:
         )
         return applied
 
+
+    def read_yaml_file(self, rel_path: str) -> dict[str, Any]:
+        """Read any YAML file under the knowledgebase root."""
+
+        path = self.base_path / rel_path
+        payload = self._load_yaml(path)
+        return payload if isinstance(payload, dict) else {}
+
+    def update_yaml_file(self, rel_path: str, payload: Mapping[str, Any], *, reason: str | None = None) -> str:
+        """Replace a YAML payload atomically and version it in metadata/changelog."""
+
+        path = self.base_path / rel_path
+        with self._file_lock(path):
+            current = self._load_yaml(path)
+            if not isinstance(current, dict):
+                current = {}
+
+            merged = dict(payload)
+            metadata = self._ensure_metadata(merged)
+            new_version = self._bump_version(metadata.get("version") or current.get("metadata", {}).get("version"))
+            timestamp = _utc_now()
+            metadata.update({"version": new_version, "updated_at": timestamp, "updated_by": self.actor})
+            merged["metadata"] = metadata
+            self._write_yaml(path, merged, lock=False)
+
+        self._append_changelog(
+            path=path,
+            change=reason or f"Updated {rel_path}",
+            version=new_version,
+            details={"keys": sorted(merged.keys())},
+        )
+        return new_version
     def learn_from_extraction(self, extraction: Mapping[str, Any] | None, *, source_uri: str | None = None) -> dict[str, list[str]]:
         if extraction is None:
             return {
