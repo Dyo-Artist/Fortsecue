@@ -11,6 +11,7 @@ import yaml
 from pydantic import BaseModel
 
 from logos.ingest import doc_ingest, note_ingest
+from logos.core.ontology_guard import OntologyIntegrityGuard
 from logos.interfaces.local_asr_stub import TranscriptionFailure
 from logos.models.bundles import (
     ExtractionBundle,
@@ -311,6 +312,8 @@ def stage_commit_validate(bundle: Any, ctx: PipelineContext) -> Any:
 def stage_graph_upsert(bundle: Any, ctx: PipelineContext) -> Any:
     context = ctx.to_mapping()
     interaction_bundle = legacy_stages.build_interaction_bundle_stage(bundle, context)
+    schema_store = context.get("schema_store", legacy_stages.SCHEMA_STORE)
+    OntologyIntegrityGuard(schema_store=schema_store).validate(interaction_bundle, context=context)
     return legacy_stages.upsert_interaction_bundle_stage(interaction_bundle, context)
 
 
