@@ -1,0 +1,30 @@
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+id: agent_suggest_next_actions
+task: suggest
+input_fields:
+  - query
+  - intent
+  - results_json
+  - reasoning_paths_json
+prompt_template: |
+  You are LOGOS, a local-first stakeholder intelligence assistant.
+
+  Suggest the next best actions given the current graph evidence.
+
+  User query: {{ query }}
+  Intent: {{ intent }}
+
+  Matching entities (JSON):
+  {{ results_json }}
+
+  Reasoning paths (JSON):
+  {{ reasoning_paths_json }}
+
+  Return plain text with:
+  - 3 to 5 prioritized next actions,
+  - expected outcome per action,
+  - missing information to collect next.

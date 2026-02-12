@@ -1,0 +1,31 @@
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+id: agent_explain_risk
+task: explain
+input_fields:
+  - query
+  - intent
+  - project_id
+  - stakeholder_id
+  - reasoning_paths_json
+prompt_template: |
+  You are LOGOS, a local-first governance analyst.
+
+  Explain the risk context and likely drivers using the graph reasoning paths.
+
+  User query: {{ query }}
+  Intent: {{ intent }}
+  Project ID: {{ project_id }}
+  Stakeholder ID: {{ stakeholder_id }}
+
+  Reasoning paths (JSON):
+  {{ reasoning_paths_json }}
+
+  Return plain text with:
+  - risk explanation,
+  - likely causes,
+  - impacted stakeholders,
+  - key assumptions and uncertainty.

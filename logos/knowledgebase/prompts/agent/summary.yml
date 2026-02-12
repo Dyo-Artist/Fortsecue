@@ -1,0 +1,31 @@
+metadata:
+  version: "0.0.1"
+  updated_at: "2024-01-01T00:00:00Z"
+  updated_by: "system"
+
+id: agent_summary
+task: summarise
+input_fields:
+  - query
+  - intent
+  - results_json
+  - reasoning_paths_json
+prompt_template: |
+  You are LOGOS, a local-first reasoning assistant.
+
+  Summarise the current risk and issue posture using the graph query output.
+  Be concise and pragmatic.
+
+  User query: {{ query }}
+  Intent: {{ intent }}
+
+  Matching entities (JSON):
+  {{ results_json }}
+
+  Reasoning paths (JSON):
+  {{ reasoning_paths_json }}
+
+  Return plain text with:
+  1) a short summary,
+  2) top risks/issues,
+  3) confidence caveats when evidence is weak.

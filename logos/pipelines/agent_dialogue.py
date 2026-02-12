@@ -10,9 +10,18 @@ from logos.core.pipeline_executor import PipelineContext, STAGE_REGISTRY
 from logos.graphio.neo4j_client import GraphUnavailable
 from logos.graphio.queries import get_top_paths
 from logos.graphio.search import search_entities
+from logos.llm.prompt import PromptEngine, PromptEngineError
 from logos.models.bundles import FeedbackBundle, InteractionMeta
 
 logger = logging.getLogger(__name__)
+PROMPT_ENGINE = PromptEngine()
+
+_INTENT_PROMPT_MAP = {
+    "summary": "agent/summary.yml",
+    "risk": "agent/explain_risk.yml",
+    "who": "agent/suggest_next_actions.yml",
+    "search": "agent/suggest_next_actions.yml",
+}
 
 
 def _trace(context: Dict[str, Any], stage_name: str) -> None:
@@ -175,22 +184,28 @@ def stage_compose_response(bundle: Any, ctx: PipelineContext) -> Dict[str, Any]:
     results = bundle.get("results", []) if isinstance(bundle, Mapping) else []
     reasoning_paths = bundle.get("reasoning_paths", []) if isinstance(bundle, Mapping) else []
 
-    if intent == "risk":
-        target = plan.get("actions", [{}])[0].get("params", {}) if isinstance(plan, Mapping) else {}
-        project_id = target.get("project_id") if isinstance(target, Mapping) else None
-        subject = f"Project {project_id}" if project_id else "the selected project"
-        agent_response = f"Based on {query or 'your query'}, here are 3 risks for {subject}:"
-    elif intent == "summary":
-        agent_response = f"Summary requested for: {query or 'the provided input'}."
-    elif intent == "who":
-        agent_response = f"Looking up ownership details for: {query or 'the provided input'}."
-    else:
-        agent_response = f"Based on your query, I found {len(results)} matching entities."
+    target = plan.get("actions", [{}])[0].get("params", {}) if isinstance(plan, Mapping) else {}
+    prompt_path = _INTENT_PROMPT_MAP.get(str(intent), "agent/suggest_next_actions.yml")
+    prompt_context = {
+        "query": query,
+        "intent": intent,
+        "project_id": target.get("project_id") if isinstance(target, Mapping) else "",
+        "stakeholder_id": target.get("stakeholder_id") if isinstance(target, Mapping) else "",
+        "results_json": results,
+        "reasoning_paths_json": reasoning_paths,
+    }
+
+    try:
+        agent_response = PROMPT_ENGINE.run_prompt(prompt_path, prompt_context)
+    except PromptEngineError as exc:
+        logger.warning("agent_dialogue_prompt_failed", extra={"error": str(exc), "prompt": prompt_path})
+        agent_response = f"Unable to compose response from prompt '{prompt_path}'."
 
     return {
         **(dict(bundle) if isinstance(bundle, Mapping) else {}),
         "agent_response": agent_response,
         "reasoning": reasoning_paths,
+        "rendered_prompt_path": prompt_path,
     }
 
 
