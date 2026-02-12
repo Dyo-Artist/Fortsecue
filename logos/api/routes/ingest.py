@@ -11,7 +11,6 @@ from fastapi.responses import JSONResponse
 
 from logos import app_state
 from logos.core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
-from logos.feedback.store import append_feedback
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.models.bundles import FeedbackBundle, InteractionMeta, PreviewBundle
 from logos.services.sync import build_graph_update_event, update_broadcaster
@@ -100,16 +99,6 @@ def _build_feedback_bundle(
     )
 
 
-def _persist_feedback(bundle: FeedbackBundle) -> None:
-    try:
-        append_feedback(bundle)
-    except Exception:  # pragma: no cover - avoid failing commit responses
-        logger.exception(
-            "feedback_persist_failed",
-            extra={"interaction_id": bundle.meta.interaction_id},
-        )
-
-
 @router.post("/interactions/{interaction_id}/commit")
 async def commit_interaction_api(
     interaction_id: str, edited_preview: PreviewBundle
@@ -124,6 +113,13 @@ async def commit_interaction_api(
 
     app_state.STAGING_STORE.save_preview(interaction_id, edited_preview)
 
+    feedback_bundle = _build_feedback_bundle(
+        interaction_id=interaction_id,
+        original_preview=original_preview,
+        committed_preview=edited_preview,
+        user_id="api",
+    )
+
     context = PipelineContext(
         request_id=interaction_id,
         user_id="api",
@@ -132,6 +128,7 @@ async def commit_interaction_api(
             "graph_client_factory": get_client,
             "commit_time": datetime.now(timezone.utc),
             "graph_update_builder": build_graph_update_event,
+            "feedback_bundle": feedback_bundle,
         },
     )
     try:
@@ -165,14 +162,6 @@ async def commit_interaction_api(
     app_state.STAGING_STORE.set_state(interaction_id, "committed")
     app_state.PENDING_INTERACTIONS.pop(interaction_id, None)
 
-    feedback_bundle = _build_feedback_bundle(
-        interaction_id=interaction_id,
-        original_preview=original_preview,
-        committed_preview=edited_preview,
-        user_id=context.user_id,
-    )
-    _persist_feedback(feedback_bundle)
-
     return summary
 
 
@@ -186,6 +175,13 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
             raise HTTPException(status_code=404, detail="interaction not found") from None
 
     try:
+        feedback_bundle = _build_feedback_bundle(
+            interaction_id=interaction_id,
+            original_preview=preview,
+            committed_preview=preview,
+            user_id="api",
+        )
+
         context = PipelineContext(
             request_id=interaction_id,
             user_id="api",
@@ -194,6 +190,7 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
                 "graph_client_factory": get_client,
                 "commit_time": datetime.now(timezone.utc),
                 "graph_update_builder": build_graph_update_event,
+                "feedback_bundle": feedback_bundle,
             },
         )
         summary = run_pipeline("pipeline.interaction_commit", preview, context)
@@ -222,13 +219,4 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
     app_state.PENDING_INTERACTIONS.pop(interaction_id, None)
     app_state.STAGING_STORE.set_state(interaction_id, "committed")
 
-    feedback_bundle = _build_feedback_bundle(
-        interaction_id=interaction_id,
-        original_preview=preview,
-        committed_preview=preview,
-        user_id=context.user_id,
-    )
-    _persist_feedback(feedback_bundle)
-
     return summary
-
