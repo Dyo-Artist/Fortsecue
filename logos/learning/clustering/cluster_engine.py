@@ -7,6 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from logos.graphio.neo4j_client import Neo4jClient, get_client
 from logos.graphio.schema_store import SchemaStore
+from logos.learning.clustering.concept_governance import ConceptGovernance, ConceptPromotionError
 
 
 @dataclass(frozen=True)
@@ -115,20 +116,11 @@ class ClusterEngine:
         if not manual_trigger:
             return False
 
-        concept_label = self._schema_store.get_schema_convention("concept_label", "Concept") or "Concept"
-        now_iso = _to_iso(datetime.now(timezone.utc))
-        self._client.run(
-            (
-                f"MATCH (c:{concept_label} {{id: $concept_id}}) "
-                "WHERE c.status = 'proposed' "
-                "SET c.status = 'canonical', c.promoted_at = datetime($promoted_at), c.promoted_by = $promoted_by"
-            ),
-            {
-                "concept_id": concept_id,
-                "promoted_at": now_iso,
-                "promoted_by": promoted_by,
-            },
-        )
+        governance = ConceptGovernance(client=self._client, schema_store=self._schema_store)
+        try:
+            governance.promote_concept(concept_id, promoted_by=promoted_by)
+        except ConceptPromotionError:
+            return False
         return True
 
 
