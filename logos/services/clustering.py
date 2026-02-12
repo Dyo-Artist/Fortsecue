@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from typing import Any, Mapping, Sequence
 
 from logos.graphio.neo4j_client import Neo4jClient, get_client
 from logos.graphio.schema_store import SchemaStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -213,6 +216,13 @@ class ClusteringService:
         hypothesis: ClusterHypothesis,
         created_at: str,
     ) -> None:
+        logger.info(
+            "execution_trace.cluster_proposal_created cluster_id=%s algorithm=%s members=%d",
+            hypothesis.cluster_id,
+            hypothesis.algorithm,
+            len(hypothesis.members),
+        )
+
         self._client.run(
             (
                 f"MERGE (c:{cluster_label} {{id: $id}}) "

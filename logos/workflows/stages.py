@@ -12,6 +12,8 @@ from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
 from logos.services.sync import build_graph_update_event
+from logos.services.embeddings import EmbeddingService
+from logos.services.clustering import ClusteringService
 from logos.knowledgebase import KnowledgebaseStore, KnowledgebaseWriteError
 from logos.models.bundles import (
     InteractionMeta,
@@ -526,6 +528,24 @@ def upsert_interaction_bundle_stage(
         upsert_interaction_bundle(tx, bundle, commit_time, schema_store=schema_store)
 
     client.run_in_tx(_tx)
+
+    if hasattr(client, "run"):
+        try:
+            embedding_summary = EmbeddingService(client=client, schema_store=schema_store).refresh_embeddings(
+                updated_at=commit_time
+            )
+            context["embedding_refresh_summary"] = embedding_summary
+        except Exception as exc:  # pragma: no cover - non-fatal learning sidecar
+            logger.warning("embed_refresh_failed", extra={"interaction_id": bundle.interaction.id, "error": str(exc)})
+
+        if bool(context.get("run_cluster_proposals", True)):
+            try:
+                cluster_summary = ClusteringService(client=client, schema_store=schema_store).run(
+                    updated_at=commit_time
+                )
+                context["cluster_summary"] = cluster_summary
+            except Exception as exc:  # pragma: no cover - non-fatal learning sidecar
+                logger.warning("cluster_proposal_failed", extra={"interaction_id": bundle.interaction.id, "error": str(exc)})
 
     try:
         update_builder = context.get("graph_update_builder", build_graph_update_event)
