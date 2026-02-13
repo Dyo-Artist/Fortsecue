@@ -50,6 +50,7 @@ class InteractionBundle(BaseModel):
     interaction: GraphNode
     nodes: list[GraphNode] = Field(default_factory=list)
     relationships: list[GraphRelationship] = Field(default_factory=list)
+    dialectical_lines: list[GraphRelationship] = Field(default_factory=list)
 
     @property
     def all_nodes(self) -> list[GraphNode]:
@@ -201,6 +202,9 @@ def upsert_interaction_bundle(
         upsert_node(tx, node, now, schema_store=schema_store, user=user)
 
     for rel in bundle.relationships:
+        rel.source_uri = rel.source_uri or source_uri
+        upsert_relationship(tx, rel, rel.source_uri, now, schema_store=schema_store, user=user)
+    for rel in bundle.dialectical_lines:
         rel.source_uri = rel.source_uri or source_uri
         upsert_relationship(tx, rel, rel.source_uri, now, schema_store=schema_store, user=user)
 

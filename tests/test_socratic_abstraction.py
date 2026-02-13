@@ -19,6 +19,8 @@ from logos.knowledgebase.store import KnowledgebaseStore
 from logos.learning.clustering.cluster_engine import ClusterEngine
 from logos.learning.clustering.concept_governance import ConceptGovernance
 from logos.learning.embeddings.concept_assignment import ConceptAssignmentEngine, ConceptAssignmentSettings
+from logos.normalise.bundle import build_interaction_bundle
+from logos.normalise.taxonomy import TaxonomyNormaliser
 from logos.reasoning.path_policy import evaluate_policy, load_or_train_and_persist_policy
 
 
@@ -119,6 +121,69 @@ def test_pink_cow_variation_prefers_cow_concept() -> None:
     pink_cow_embedding = engine._embed_text("pink spotted cow")
 
     assert _cosine(pink_cow_embedding, cow_embedding) > _cosine(pink_cow_embedding, pig_embedding)
+
+
+def test_tiny_pink_cow_stays_cow_with_attributes_and_dialectical_tension(tmp_path: Path) -> None:
+    kb_root = tmp_path / "kb"
+    concepts_dir = kb_root / "concepts"
+    profiles_dir = kb_root / "domain_profiles"
+    concepts_dir.mkdir(parents=True)
+    profiles_dir.mkdir(parents=True)
+
+    (profiles_dir / "animals.yml").write_text("concept_files:\n  animal_types: ../concepts/animal_types.yml\n")
+    (concepts_dir / "animal_types.yml").write_text(
+        "animal_types:\n"
+        "  - id: concept_cow\n"
+        "    name: Cow\n"
+        "    applies_to: [Concept]\n"
+        "    disallowed_attributes: [tiny]\n"
+        "  - id: concept_pig\n"
+        "    name: Pig\n"
+        "    applies_to: [Concept]\n"
+    )
+
+    normaliser = TaxonomyNormaliser(domain_profile_path=profiles_dir / "animals.yml")
+    preview = {
+        "entities": {
+            "risks": [
+                {
+                    "id": "animal_1",
+                    "title": "tiny pink cow",
+                    "category": "tiny pink cow",
+                    "embedding": normaliser._assignment_engine("animal_types")._embed_text("tiny pink cow"),
+                }
+            ]
+        },
+        "relationships": [],
+    }
+
+    resolved = normaliser._apply_to_entity(
+        preview["entities"]["risks"][0],
+        concept_key="animal_types",
+        hint_value="tiny pink cow",
+        target_field="category",
+    )
+    preview["entities"]["risks"][0] = resolved
+    normaliser._attach_alignment_relationships(preview)
+
+    assignment = resolved["hint_resolution"]["animal_types"]
+    assert assignment["canonical_id"] == "concept_cow"
+    assert resolved["category"] == "concept_cow"
+
+    has_attribute = {
+        (item["rel"], item.get("properties", {}).get("attribute"))
+        for item in preview["relationships"]
+        if item.get("rel") == "HAS_ATTRIBUTE"
+    }
+    assert ("HAS_ATTRIBUTE", "pink") in has_attribute
+    assert ("HAS_ATTRIBUTE", "tiny") in has_attribute
+
+    assert preview["dialectical_lines"]
+    assert preview["dialectical_lines"][0]["properties"]["thesis"] == "concept_cow"
+    assert preview["dialectical_lines"][0]["properties"]["proposed_resolution"] == "ask_user_or_collect_more_evidence"
+
+    bundle = build_interaction_bundle("i-cow", {"interaction": {"id": "i-cow", "type": "obs"}, **preview})
+    assert any(rel.rel_type == "HAS_ATTRIBUTE" for rel in bundle.relationships)
 
 
 def test_new_synonym_cluster_creates_proposed_concept(tmp_path: Path) -> None:
