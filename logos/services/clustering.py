@@ -27,6 +27,10 @@ class ClusterHypothesis:
     kind: str
     algorithm: str
     members: tuple[ClusterMember, ...]
+    centroid_embedding: Mapping[str, list[float]]
+    exemplar_particular_ids: tuple[str, ...]
+    cohesion_score: float
+    nearest_existing_concepts: tuple[Mapping[str, Any], ...]
     provenance: Mapping[str, Any]
 
 
@@ -52,16 +56,20 @@ class ClusteringService:
         now = updated_at or datetime.now(timezone.utc)
         created_at = _to_iso(now)
 
-        cluster_label = self._schema_store.get_schema_convention("concept_cluster_label", "ConceptCluster") or "ConceptCluster"
         in_cluster_rel = self._schema_store.get_schema_convention("in_cluster_relationship", "IN_CLUSTER") or "IN_CLUSTER"
         concept_label = self._schema_store.get_schema_convention("concept_label", "Concept") or "Concept"
         particular_label = self._schema_store.get_schema_convention("particular_label", "Particular") or "Particular"
         interaction_label = self._schema_store.get_schema_convention("interaction_label", "Interaction") or "Interaction"
+        candidate_rel = (
+            self._schema_store.get_schema_convention("candidate_instance_of_relationship", "CANDIDATE_INSTANCE_OF")
+            or "CANDIDATE_INSTANCE_OF"
+        )
 
         hypotheses: list[ClusterHypothesis] = []
         if run_hdbscan:
             hypotheses.extend(
                 self._build_hdbscan_hypotheses(
+                    concept_label=concept_label,
                     particular_label=particular_label,
                     interaction_label=interaction_label,
                     created_at=created_at,
@@ -76,22 +84,42 @@ class ClusteringService:
             )
 
         for hypothesis in hypotheses:
+            self._detect_concept_drift(concept_label=concept_label, hypothesis=hypothesis, created_at=created_at)
             self._write_cluster_hypothesis(
-                cluster_label=cluster_label,
+                concept_label=concept_label,
                 in_cluster_rel=in_cluster_rel,
+                candidate_rel=candidate_rel,
                 hypothesis=hypothesis,
                 created_at=created_at,
             )
 
         self._schema_store.record_node_type(
-            cluster_label,
-            {"id", "kind", "created_at", "algorithm", "status", "provenance", "updated_at"},
-            concept_kind="ClusterHypothesis",
+            concept_label,
+            {
+                "id",
+                "kind",
+                "status",
+                "algorithm",
+                "cluster_id",
+                "centroid_embedding",
+                "exemplar_particular_ids",
+                "cohesion_score",
+                "nearest_existing_concepts",
+                "provenance",
+                "created_at",
+                "updated_at",
+            },
+            concept_kind="ConceptHypothesis",
             now=now,
         )
         self._schema_store.record_relationship_type(
             in_cluster_rel,
             {"score", "algorithm", "created_at", "provenance"},
+            now=now,
+        )
+        self._schema_store.record_relationship_type(
+            candidate_rel,
+            {"algorithm", "created_at", "provenance"},
             now=now,
         )
 
@@ -103,6 +131,7 @@ class ClusteringService:
     def _build_hdbscan_hypotheses(
         self,
         *,
+        concept_label: str,
         particular_label: str,
         interaction_label: str,
         created_at: str,
@@ -128,10 +157,15 @@ class ClusteringService:
                 )
             )
 
+        concept_rows = self._fetch_embedding_rows(concept_label, "embedding_graph")
+        concept_index = {row["id"]: row["embedding"] for row in concept_rows}
         hypotheses: list[ClusterHypothesis] = []
         for group_id, members in sorted(grouped.items()):
             if len(members) < 2:
                 continue
+            embedding_by_id = {row["id"]: row["embedding"] for row in rows}
+            member_vectors = [embedding_by_id[member.entity_id] for member in members if member.entity_id in embedding_by_id]
+            centroid = _centroid(member_vectors)
             kind = "embedding_hypothesis_text"
             cluster_id = _cluster_id(kind=kind, algorithm="hdbscan", seed=f"{group_id}:{created_at}", members=members)
             hypotheses.append(
@@ -140,10 +174,37 @@ class ClusteringService:
                     kind=kind,
                     algorithm="hdbscan",
                     members=tuple(sorted(members, key=lambda m: (m.entity_label, m.entity_id))),
+                    centroid_embedding={"text": centroid},
+                    exemplar_particular_ids=tuple(
+                        _top_n_exemplars(
+                            members,
+                            embedding_by_id,
+                            centroid,
+                            particular_label=particular_label,
+                            limit=5,
+                        )
+                    ),
+                    cohesion_score=_cluster_cohesion(member_vectors, centroid),
+                    nearest_existing_concepts=tuple(
+                        _nearest_concepts(
+                            centroid,
+                            concept_index,
+                            k=3,
+                        )
+                    ),
                     provenance={
                         "status": "hypothesis",
                         "sources": [particular_label, interaction_label],
                         "embedding_field": "embedding_text",
+                        "source_interactions": sorted(
+                            member.entity_id for member in members if member.entity_label == interaction_label
+                        ),
+                        "source_particulars": sorted(
+                            member.entity_id for member in members if member.entity_label == particular_label
+                        ),
+                        "timestamps": {
+                            "created_at": created_at,
+                        },
                         "review_required": True,
                     },
                 )
@@ -177,11 +238,26 @@ class ClusteringService:
                     kind=kind,
                     algorithm="leiden",
                     members=tuple(members),
+                    centroid_embedding={"graph": _centroid([row["embedding"] for row in rows if row["id"] in member_ids])},
+                    exemplar_particular_ids=tuple(),
+                    cohesion_score=_cluster_cohesion(
+                        [row["embedding"] for row in rows if row["id"] in member_ids],
+                        _centroid([row["embedding"] for row in rows if row["id"] in member_ids]),
+                    ),
+                    nearest_existing_concepts=tuple(
+                        _nearest_concepts(
+                            _centroid([row["embedding"] for row in rows if row["id"] in member_ids]),
+                            {row["id"]: row["embedding"] for row in rows if row["id"] not in member_ids},
+                            k=3,
+                        )
+                    ),
                     provenance={
                         "status": "hypothesis",
                         "sources": [concept_label],
                         "embedding_field": "embedding_graph",
                         "graph": "knn_neighbourhood",
+                        "source_interactions": [],
+                        "timestamps": {"created_at": created_at},
                         "review_required": True,
                     },
                 )
@@ -211,8 +287,9 @@ class ClusteringService:
     def _write_cluster_hypothesis(
         self,
         *,
-        cluster_label: str,
+        concept_label: str,
         in_cluster_rel: str,
+        candidate_rel: str,
         hypothesis: ClusterHypothesis,
         created_at: str,
     ) -> None:
@@ -225,16 +302,24 @@ class ClusteringService:
 
         self._client.run(
             (
-                f"MERGE (c:{cluster_label} {{id: $id}}) "
+                f"MERGE (c:{concept_label} {{id: $id}}) "
                 "ON CREATE SET c.created_at = datetime($created_at) "
-                "SET c.kind = $kind, c.algorithm = $algorithm, c.status = 'hypothesis', "
+                "SET c.kind = $kind, c.algorithm = $algorithm, c.status = 'proposed', "
+                "c.cluster_id = $cluster_id, c.centroid_embedding = $centroid_embedding, "
+                "c.exemplar_particular_ids = $exemplar_particular_ids, c.cohesion_score = $cohesion_score, "
+                "c.nearest_existing_concepts = $nearest_existing_concepts, "
                 "c.provenance = $provenance, c.updated_at = datetime($created_at)"
             ),
             {
                 "id": hypothesis.cluster_id,
+                "cluster_id": hypothesis.cluster_id,
                 "kind": hypothesis.kind,
                 "algorithm": hypothesis.algorithm,
                 "created_at": created_at,
+                "centroid_embedding": dict(hypothesis.centroid_embedding),
+                "exemplar_particular_ids": list(hypothesis.exemplar_particular_ids),
+                "cohesion_score": float(hypothesis.cohesion_score),
+                "nearest_existing_concepts": [dict(item) for item in hypothesis.nearest_existing_concepts],
                 "provenance": dict(hypothesis.provenance),
             },
         )
@@ -243,7 +328,7 @@ class ClusteringService:
             self._client.run(
                 (
                     f"MATCH (e:{member.entity_label} {{id: $entity_id}}) "
-                    f"MATCH (c:{cluster_label} {{id: $cluster_id}}) "
+                    f"MATCH (c:{concept_label} {{id: $cluster_id}}) "
                     f"MERGE (e)-[r:{in_cluster_rel}]->(c) "
                     "SET r.score = $score, r.algorithm = $algorithm, "
                     "r.created_at = datetime($created_at), r.provenance = $provenance"
@@ -257,6 +342,83 @@ class ClusteringService:
                     "provenance": dict(hypothesis.provenance),
                 },
             )
+
+        for particular_id in hypothesis.exemplar_particular_ids:
+            self._client.run(
+                (
+                    f"MATCH (p:{self._schema_store.get_schema_convention('particular_label', 'Particular') or 'Particular'} {{id: $particular_id}}) "
+                    f"MATCH (c:{concept_label} {{id: $concept_id}}) "
+                    f"MERGE (p)-[r:{candidate_rel}]->(c) "
+                    "SET r.algorithm = $algorithm, r.created_at = datetime($created_at), r.provenance = $provenance"
+                ),
+                {
+                    "particular_id": particular_id,
+                    "concept_id": hypothesis.cluster_id,
+                    "algorithm": hypothesis.algorithm,
+                    "created_at": created_at,
+                    "provenance": {"source": "clustering_service", **dict(hypothesis.provenance)},
+                },
+            )
+
+    def _detect_concept_drift(self, *, concept_label: str, hypothesis: ClusterHypothesis, created_at: str) -> None:
+        graph_centroid = hypothesis.centroid_embedding.get("graph") or hypothesis.centroid_embedding.get("text")
+        if not graph_centroid:
+            return
+        rows = self._client.run(
+            f"MATCH (c:{concept_label} {{id: $concept_id}}) RETURN c.centroid_embedding AS centroid_embedding",
+            {"concept_id": hypothesis.cluster_id},
+        )
+        if not rows:
+            return
+        existing = rows[0].get("centroid_embedding")
+        if not isinstance(existing, Mapping):
+            return
+        prior = existing.get("graph") or existing.get("text")
+        if not isinstance(prior, Sequence):
+            return
+        try:
+            prior_vector = [float(v) for v in prior]
+        except (TypeError, ValueError):
+            return
+
+        threshold_raw = self._schema_store.get_schema_convention("concept_drift_threshold", "0.15") or "0.15"
+        try:
+            threshold = float(threshold_raw)
+        except ValueError:
+            threshold = 0.15
+        drift = 1.0 - _cosine_similarity(prior_vector, graph_centroid)
+        if drift <= threshold:
+            return
+
+        review_label = self._schema_store.get_schema_convention("dialectical_review_label", "DialecticalReviewItem") or "DialecticalReviewItem"
+        review_rel = self._schema_store.get_schema_convention("dialectical_review_relationship", "REQUIRES_DIALECTICAL_REVIEW") or "REQUIRES_DIALECTICAL_REVIEW"
+        review_id = f"drift:{hypothesis.cluster_id}:{created_at}"
+        self._client.run(
+            (
+                f"MERGE (d:{review_label} {{id: $review_id}}) "
+                "ON CREATE SET d.created_at = datetime($created_at) "
+                "SET d.kind = 'concept_drift', d.status = 'open', d.cluster_id = $cluster_id, "
+                "d.drift_score = $drift_score, d.threshold = $threshold, d.updated_at = datetime($created_at)"
+            ),
+            {
+                "review_id": review_id,
+                "cluster_id": hypothesis.cluster_id,
+                "created_at": created_at,
+                "drift_score": drift,
+                "threshold": threshold,
+            },
+        )
+        self._client.run(
+            (
+                f"MATCH (c:{concept_label} {{id: $concept_id}}) "
+                f"MATCH (d:{review_label} {{id: $review_id}}) "
+                f"MERGE (d)-[:{review_rel}]->(c)"
+            ),
+            {
+                "concept_id": hypothesis.cluster_id,
+                "review_id": review_id,
+            },
+        )
 
 
 def _hdbscan_labels(vectors: list[list[float]]) -> tuple[list[int], list[float]]:
@@ -356,6 +518,51 @@ def _cluster_id(*, kind: str, algorithm: str, seed: str, members: Sequence[Clust
     joined = "|".join(f"{member.entity_label}:{member.entity_id}" for member in sorted(members, key=lambda m: (m.entity_label, m.entity_id)))
     digest = hashlib.sha1(f"{kind}:{algorithm}:{seed}:{joined}".encode("utf-8")).hexdigest()[:16]
     return f"cluster_{digest}"
+
+
+def _centroid(vectors: Sequence[Sequence[float]]) -> list[float]:
+    if not vectors:
+        return []
+    width = len(vectors[0])
+    return [sum(float(vector[idx]) for vector in vectors) / float(len(vectors)) for idx in range(width)]
+
+
+def _cluster_cohesion(vectors: Sequence[Sequence[float]], centroid: Sequence[float]) -> float:
+    if not vectors or not centroid:
+        return 0.0
+    scores = [_cosine_similarity(vector, centroid) for vector in vectors]
+    return sum(scores) / float(len(scores))
+
+
+def _top_n_exemplars(
+    members: Sequence[ClusterMember],
+    embeddings: Mapping[str, Sequence[float]],
+    centroid: Sequence[float],
+    *,
+    particular_label: str,
+    limit: int,
+) -> list[str]:
+    scored: list[tuple[float, str]] = []
+    for member in members:
+        if member.entity_label != particular_label:
+            continue
+        vector = embeddings.get(member.entity_id)
+        if vector is None:
+            continue
+        scored.append((_cosine_similarity(vector, centroid), member.entity_id))
+    scored.sort(reverse=True)
+    return [entity_id for _, entity_id in scored[:limit]]
+
+
+def _nearest_concepts(centroid: Sequence[float], concept_vectors: Mapping[str, Sequence[float]], *, k: int) -> list[dict[str, Any]]:
+    if not centroid:
+        return []
+    scored = [
+        {"concept_id": concept_id, "similarity": _cosine_similarity(centroid, vector)}
+        for concept_id, vector in concept_vectors.items()
+    ]
+    scored.sort(key=lambda item: float(item["similarity"]), reverse=True)
+    return scored[:k]
 
 
 def _cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:

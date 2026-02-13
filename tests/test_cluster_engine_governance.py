@@ -40,6 +40,29 @@ class FakeNeo4jClient:
                 concept["status"] = "canonical"
             self.promotions.append(dict(params))
             return []
+        if "RETURN c.id AS id" in cypher:
+            concept = self.concepts.get(params["concept_id"])
+            return [{"id": params["concept_id"]}] if concept else []
+        if "RETURN count(moved) AS repointed_count" in cypher:
+            source_id = params["source_concept_id"]
+            moved = 0
+            for rel in self.relationships:
+                if rel.get("concept_id") == source_id:
+                    rel["concept_id"] = params["target_concept_id"]
+                    moved += 1
+            return [{"repointed_count": moved}]
+        if "SET c.status = 'merged'" in cypher:
+            concept = self.concepts.get(params["source_concept_id"])
+            if concept:
+                concept["status"] = "merged"
+                concept["merged_into"] = params["target_concept_id"]
+            return []
+        if "SET c.status = 'rejected'" in cypher:
+            concept = self.concepts.get(params["concept_id"])
+            if concept:
+                concept["status"] = "rejected"
+                concept["rejection_provenance"] = params["rejection_provenance"]
+            return []
         raise AssertionError(f"Unexpected query: {cypher}")
 
 
@@ -161,3 +184,45 @@ def test_concept_governance_rejects_non_proposed_concepts(tmp_path: Path) -> Non
         assert exc.code == "CONCEPT_NOT_PROPOSED"
     else:
         raise AssertionError("Expected ConceptPromotionError")
+
+
+def test_concept_governance_merge_repoints_and_preserves_provenance(tmp_path: Path) -> None:
+    client = FakeNeo4jClient()
+    store = _schema_store(tmp_path)
+    engine = ClusterEngine(client=client, schema_store=store)
+
+    proposed = engine.propose_concept_from_cluster(
+        cluster_id="cluster-merge",
+        parent_form="Form:Topic",
+        particular_ids=["p-1", "p-2"],
+        algorithm="hdbscan",
+    )
+    client.concepts["concept-target"] = {"status": "canonical"}
+
+    governance = ConceptGovernance(client=client, schema_store=store)
+    result = governance.merge_proposed_concept(proposed.concept_id, "concept-target", merged_by="reviewer-2")
+
+    assert result.status == "merged"
+    assert result.repointed_relationships == 2
+    assert result.provenance["target_concept_id"] == "concept-target"
+    assert client.concepts[proposed.concept_id]["status"] == "merged"
+    assert all(rel["concept_id"] == "concept-target" for rel in client.relationships)
+
+
+def test_concept_governance_reject_marks_for_audit(tmp_path: Path) -> None:
+    client = FakeNeo4jClient()
+    store = _schema_store(tmp_path)
+    engine = ClusterEngine(client=client, schema_store=store)
+    proposed = engine.propose_concept_from_cluster(
+        cluster_id="cluster-reject",
+        parent_form="Form:Topic",
+        particular_ids=["p-1"],
+        algorithm="hdbscan",
+    )
+
+    governance = ConceptGovernance(client=client, schema_store=store)
+    result = governance.reject_proposed_concept(proposed.concept_id, rejected_by="reviewer-3", reason="low_cohesion")
+
+    assert result.status == "rejected"
+    assert result.provenance["reason"] == "low_cohesion"
+    assert client.concepts[proposed.concept_id]["status"] == "rejected"
