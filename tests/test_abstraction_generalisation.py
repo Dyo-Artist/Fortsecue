@@ -54,7 +54,7 @@ def test_abstraction_generalisation_prefers_cow_over_pig() -> None:
         value_embedding=tiny_pink_cow_embedding,
         context={"entity_type": "concept"},
         candidates=[
-            {**cow, "embedding": cow_embedding},
+            {**cow, "embedding": cow_embedding, "disallowed_attributes": ["tiny"]},
             {**pig, "embedding": pig_embedding},
         ],
     )
@@ -64,3 +64,9 @@ def test_abstraction_generalisation_prefers_cow_over_pig() -> None:
         "Expected INSTANCE_OF relation to resolve to Cow concept. "
         f"Similarity matrix: {similarity_matrix}; candidates: {assignment['candidates']}"
     )
+    assert assignment["chosen_concept"]["id"] == "concept_cow"
+    assert assignment["concept_candidates"][0]["id"] == "concept_cow"
+    assert assignment["assignment_evidence"]["nearest_neighbour_concepts"]
+    assert "pink" in assignment["assignment_evidence"]["salient_phrases"]
+    assert any(item["attribute"] == "pink" for item in assignment["anomalies"])
+    assert any(item["attribute"] == "tiny" and item["contradiction_type"] == "identity_conflict" for item in assignment["anomalies"])

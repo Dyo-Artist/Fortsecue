@@ -21,6 +21,7 @@ class ConceptAssignmentSettings:
     structural_weight: float = 0.1
     lexical_weight: float = 0.05
     embedding_dimensions: int = 24
+    candidate_limit: int = 5
 
     @classmethod
     def from_thresholds(cls, thresholds: Mapping[str, Any] | None, category: str) -> "ConceptAssignmentSettings":
@@ -42,6 +43,7 @@ class ConceptAssignmentSettings:
             embedding_weight=_pick("embedding_weight", cls.embedding_weight),
             structural_weight=_pick("structural_weight", cls.structural_weight),
             lexical_weight=_pick("lexical_weight", cls.lexical_weight),
+            candidate_limit=int(_pick("candidate_limit", cls.candidate_limit)),
         )
 
 
@@ -85,6 +87,7 @@ class ConceptAssignmentEngine:
                 {
                     "id": entry.get("id"),
                     "name": entry.get("name"),
+                    "disallowed_attributes": list(entry.get("disallowed_attributes") or []),
                     "score": float(total),
                     "cosine_similarity": float(cosine),
                     "structural_compatibility": float(structural),
@@ -102,6 +105,7 @@ class ConceptAssignmentEngine:
             )
 
         scored.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+        scored = scored[: max(1, settings.candidate_limit)]
         logger.info("Competing concept candidates for %r: %s", value, [self._compact(c) for c in scored[:5]])
 
         if not scored:
@@ -118,7 +122,18 @@ class ConceptAssignmentEngine:
         elif runner_up and (best["score"] - runner_up["score"] <= settings.ambiguity_gap):
             status = "ambiguous"
 
-        decision_mode = "embedding_similarity" if best["embedding_similarity"] >= settings.embedding_similarity_threshold else "lexical_or_structural_fallback"
+        decision_mode = (
+            "embedding_similarity"
+            if best["embedding_similarity"] >= settings.embedding_similarity_threshold
+            else "lexical_or_structural_fallback"
+        )
+        assignment_evidence = self._assignment_evidence(value, scored)
+        modifiers = assignment_evidence.get("salient_phrases", [])
+        anomalies = self._detect_anomalies(value, best, modifiers)
+        chosen_concept = {
+            "id": best.get("id") if status == "matched" else None,
+            "confidence": float(best.get("score", 0.0)) if status == "matched" else 0.0,
+        }
         logger.info(
             "execution_trace.concept_assignment_decision concept_key=%s source=%r canonical_id=%s status=%s mode=%s top_score=%.4f top_similarity=%.4f",
             concept_key,
@@ -138,7 +153,64 @@ class ConceptAssignmentEngine:
             "status": status,
             "decision_threshold": settings.decision_threshold,
             "candidates": scored,
+            "concept_candidates": [{"id": row.get("id"), "score": float(row.get("score", 0.0))} for row in scored],
+            "chosen_concept": chosen_concept,
+            "assignment_evidence": assignment_evidence,
+            "anomalies": anomalies,
+            "modifiers": modifiers,
         }
+
+    def _assignment_evidence(self, value: str, scored: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        nearest = []
+        for candidate in scored[:3]:
+            nearest.append(
+                {
+                    "id": candidate.get("id"),
+                    "name": candidate.get("name"),
+                    "embedding_similarity": float(candidate.get("embedding_similarity", 0.0)),
+                    "score": float(candidate.get("score", 0.0)),
+                }
+            )
+        return {"nearest_neighbour_concepts": nearest, "salient_phrases": self._salient_phrases(value)}
+
+    def _salient_phrases(self, value: str) -> list[str]:
+        tokens = [token.strip(" ,.;:!?\t\n") for token in value.lower().split()]
+        filtered = [token for token in tokens if token]
+        if len(filtered) <= 1:
+            return []
+        return [token for token in filtered[:-1] if token not in {"a", "an", "the", "very", "quite"}]
+
+    def _detect_anomalies(
+        self,
+        value: str,
+        best: Mapping[str, Any],
+        modifiers: Sequence[str],
+    ) -> list[dict[str, str]]:
+        anomalies: list[dict[str, str]] = []
+        disallowed = {
+            _normalise_text(item) for item in (best.get("disallowed_attributes") or []) if _normalise_text(item)
+        }
+        for modifier in modifiers:
+            norm_modifier = _normalise_text(modifier)
+            if not norm_modifier:
+                continue
+            if norm_modifier in disallowed:
+                anomalies.append(
+                    {
+                        "attribute": modifier,
+                        "contradiction_type": "identity_conflict",
+                        "explanation": f"Observed attribute '{modifier}' conflicts with known identity constraints for {best.get('name') or best.get('id')}.",
+                    }
+                )
+            elif len(modifier) > 2:
+                anomalies.append(
+                    {
+                        "attribute": modifier,
+                        "contradiction_type": "modifier_variation",
+                        "explanation": f"'{modifier}' is treated as an attribute of '{value}' rather than evidence of a new concept.",
+                    }
+                )
+        return anomalies
 
     def _entry_embedding(self, entry: Mapping[str, Any]) -> list[float]:
         candidate_embedding = self._as_embedding(entry.get("embedding"))
@@ -229,6 +301,11 @@ class ConceptAssignmentEngine:
             "status": "unmatched",
             "decision_threshold": self.settings.decision_threshold,
             "candidates": [],
+            "concept_candidates": [],
+            "chosen_concept": {"id": None, "confidence": 0.0},
+            "assignment_evidence": {"nearest_neighbour_concepts": [], "salient_phrases": []},
+            "anomalies": [],
+            "modifiers": [],
         }
 
 

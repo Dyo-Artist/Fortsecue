@@ -338,7 +338,18 @@ def build_interaction_bundle(interaction_id: str, preview: Dict[str, Any]) -> In
         if isinstance(rel, dict) and rel.get("src") and rel.get("dst") and rel.get("rel")
     ] + inferred_relationships + reasoning_relationships
 
-    return InteractionBundle(interaction=interaction, nodes=nodes, relationships=relationships)
+    dialectical_lines = [
+        GraphRelationship.model_validate(rel)
+        for rel in (preview.get("dialectical_lines", []) if isinstance(preview, dict) else [])
+        if isinstance(rel, dict) and rel.get("src") and rel.get("dst") and rel.get("rel")
+    ]
+
+    return InteractionBundle(
+        interaction=interaction,
+        nodes=nodes,
+        relationships=relationships,
+        dialectical_lines=dialectical_lines,
+    )
 
 
 def build_agent_bundle(

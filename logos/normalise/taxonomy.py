@@ -121,6 +121,80 @@ class TaxonomyNormaliser:
             updated[target_field] = result["canonical_id"]
         return updated
 
+    def _append_unresolved(self, preview: dict[str, Any], item: Mapping[str, Any]) -> None:
+        unresolved = preview.get("unresolved_particulars") if isinstance(preview.get("unresolved_particulars"), list) else []
+        unresolved.append(dict(item))
+        preview["unresolved_particulars"] = unresolved
+
+    def _normalise_attribute_id(self, attribute: str) -> str:
+        token = "_".join(part for part in attribute.lower().replace("-", " ").split() if part)
+        return f"attr_{token}" if token else "attr_unknown"
+
+    def _attach_alignment_relationships(self, preview: dict[str, Any]) -> None:
+        entities = preview.get("entities") if isinstance(preview.get("entities"), Mapping) else {}
+        relationships = preview.get("relationships") if isinstance(preview.get("relationships"), list) else []
+        dialectical_lines = preview.get("dialectical_lines") if isinstance(preview.get("dialectical_lines"), list) else []
+
+        for records in entities.values():
+            if not isinstance(records, list):
+                continue
+            for entity in records:
+                if not isinstance(entity, Mapping):
+                    continue
+                entity_id = entity.get("id") or entity.get("temp_id")
+                if not entity_id:
+                    continue
+
+                hints = entity.get("hint_resolution") if isinstance(entity.get("hint_resolution"), Mapping) else {}
+                for concept_key, assignment in hints.items():
+                    if not isinstance(assignment, Mapping):
+                        continue
+
+                    if not assignment.get("canonical_id"):
+                        self._append_unresolved(
+                            preview,
+                            {
+                                "entity_id": str(entity_id),
+                                "concept_key": str(concept_key),
+                                "status": assignment.get("status") or "unresolved",
+                            },
+                        )
+
+                    for modifier in assignment.get("modifiers", []):
+                        if not isinstance(modifier, str) or not modifier:
+                            continue
+                        attr_id = self._normalise_attribute_id(modifier)
+                        relationships.append(
+                            {
+                                "src": str(entity_id),
+                                "dst": attr_id,
+                                "rel": "HAS_ATTRIBUTE",
+                                "dst_label": "Concept",
+                                "properties": {"attribute": modifier, "source": "s4_alignment"},
+                            }
+                        )
+
+                    for anomaly in assignment.get("anomalies", []):
+                        if not isinstance(anomaly, Mapping):
+                            continue
+                        dialectical_lines.append(
+                            {
+                                "src": str(entity_id),
+                                "dst": str(assignment.get("canonical_id") or entity_id),
+                                "rel": "DIALECTICAL_TENSION",
+                                "properties": {
+                                    "thesis": assignment.get("canonical_id"),
+                                    "antithesis": anomaly.get("attribute"),
+                                    "contradiction_type": anomaly.get("contradiction_type"),
+                                    "explanation": anomaly.get("explanation"),
+                                    "proposed_resolution": "ask_user_or_collect_more_evidence",
+                                },
+                            }
+                        )
+
+        preview["relationships"] = relationships
+        preview["dialectical_lines"] = dialectical_lines
+
     def _normalise_person_or_org(self, record: Mapping[str, Any]) -> dict[str, Any]:
         hints = record.get("hints") if isinstance(record.get("hints"), Mapping) else {}
         hint_value = hints.get("stakeholder_type") or hints.get("role") or record.get("type") or record.get("role")
@@ -153,4 +227,5 @@ class TaxonomyNormaliser:
         entities["risks"] = [self._normalise_risk(risk) for risk in risks if isinstance(risk, Mapping)]
 
         updated_preview["entities"] = entities
+        self._attach_alignment_relationships(updated_preview)
         return updated_preview
