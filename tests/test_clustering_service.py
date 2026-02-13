@@ -32,6 +32,7 @@ class FakeNeo4jClient:
         }
         self.cluster_nodes: dict[str, dict] = {}
         self.cluster_edges: list[dict] = []
+        self.drift_reviews: list[dict] = []
 
     def run(self, cypher: str, params: dict | None = None):
         params = params or {}
@@ -47,10 +48,21 @@ class FakeNeo4jClient:
                 {"id": node_id, "embedding": node["embedding_graph"]}
                 for node_id, node in sorted(self.nodes.get(label, {}).items())
             ]
-        if "MERGE (c:" in cypher and "status = 'hypothesis'" in cypher:
+        if "RETURN c.centroid_embedding AS centroid_embedding" in cypher:
+            concept = self.cluster_nodes.get(params["concept_id"])
+            return [{"centroid_embedding": concept.get("centroid_embedding")}] if concept else []
+        if "MERGE (c:" in cypher and "status = 'proposed'" in cypher:
             self.cluster_nodes[params["id"]] = dict(params)
             return []
+        if "MERGE (d:" in cypher and "d.kind = 'concept_drift'" in cypher:
+            self.drift_reviews.append(dict(params))
+            return []
+        if "MERGE (d)-[:" in cypher:
+            return []
         if "MERGE (e)-[r:" in cypher:
+            self.cluster_edges.append(dict(params))
+            return []
+        if "MERGE (p)-[r:" in cypher and "CANDIDATE_INSTANCE_OF" in cypher:
             self.cluster_edges.append(dict(params))
             return []
         raise AssertionError(f"Unexpected query: {cypher}")
@@ -77,7 +89,7 @@ def _schema_store(tmp_path: Path) -> SchemaStore:
         "  concept_label: Concept\n"
         "  particular_label: Particular\n"
         "  interaction_label: Interaction\n"
-        "  concept_cluster_label: ConceptCluster\n"
+        "  candidate_instance_of_relationship: CANDIDATE_INSTANCE_OF\n"
         "  in_cluster_relationship: IN_CLUSTER\n"
     )
     version.write_text("version: 1\nlast_updated: null\n")
@@ -112,5 +124,6 @@ def test_clustering_service_records_dynamic_schema_types(tmp_path: Path) -> None
         version_path=tmp_path / "version.yml",
         mutable=False,
     )
-    assert "ConceptCluster" in refreshed.node_types
+    assert "Concept" in refreshed.node_types
     assert "IN_CLUSTER" in refreshed.relationship_types
+    assert "CANDIDATE_INSTANCE_OF" in refreshed.relationship_types
