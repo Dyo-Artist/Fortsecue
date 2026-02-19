@@ -33,6 +33,7 @@ reasoning_policy:
     incremental_threshold: 25
     reinforcement_log: data/reinforcement_log.jsonl
     max_archive_entries: 25
+    seed: 13
   coefficient_archive: []
 metadata:
   version: 0.0.0

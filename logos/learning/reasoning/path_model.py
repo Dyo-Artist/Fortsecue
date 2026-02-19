@@ -20,10 +20,13 @@ class ReasoningPathModel:
 
 @dataclass(slots=True)
 class PathScoreResult:
+    path_id: str
+    path_nodes: list[dict[str, Any]]
+    path_edges: list[dict[str, Any]]
+    feature_vector: dict[str, float]
     risk_score: float
     influence_score: float
     feature_contributions: dict[str, float]
-    path_breakdown: list[dict[str, Any]]
     explanation: str
     model_version: str
     model_trained: bool
@@ -66,28 +69,21 @@ def score_entity_path(
     features: Mapping[str, float],
     interactions: Sequence[Mapping[str, Any]],
     commitments: Sequence[Mapping[str, Any]],
+    path_id: str,
+    path_nodes: Sequence[Mapping[str, Any]],
+    path_edges: Sequence[Mapping[str, Any]],
 ) -> PathScoreResult:
-    path_breakdown = [
-        {
-            "path_segment": "interactions",
-            "count": len(interactions),
-            "sample_ids": [str(item.get("id")) for item in interactions[:3] if item.get("id")],
-        },
-        {
-            "path_segment": "commitments",
-            "count": len(commitments),
-            "sample_ids": [str(item.get("id")) for item in commitments[:3] if item.get("id")],
-        },
-    ]
-
     if not model.trained:
-        logger.warning("Reasoning path model is not trained; falling back to neutral scoring")
+        logger.warning("Reasoning path model is not trained; using explicit neutral fallback")
         influence_score = min(1.0, _safe_float(features.get("interaction_count"), 0.0) / 10.0)
         return PathScoreResult(
+            path_id=path_id,
+            path_nodes=[dict(node) for node in path_nodes],
+            path_edges=[dict(edge) for edge in path_edges],
+            feature_vector={str(key): _safe_float(value) for key, value in features.items()},
             risk_score=0.5,
             influence_score=influence_score,
             feature_contributions={},
-            path_breakdown=path_breakdown,
             explanation="Neutral fallback because reasoning path model is not trained.",
             model_version=model.version,
             model_trained=False,
@@ -98,10 +94,13 @@ def score_entity_path(
     influence_signal = _safe_float(features.get("interaction_count"), 0.0)
     influence_score = min(1.0, influence_signal / 10.0)
     return PathScoreResult(
+        path_id=path_id,
+        path_nodes=[dict(node) for node in path_nodes],
+        path_edges=[dict(edge) for edge in path_edges],
+        feature_vector={str(key): _safe_float(value) for key, value in features.items()},
         risk_score=float(score),
         influence_score=influence_score,
         feature_contributions={str(k): float(v) for k, v in contributions.items()},
-        path_breakdown=path_breakdown,
         explanation=explanation,
         model_version=model.version,
         model_trained=True,

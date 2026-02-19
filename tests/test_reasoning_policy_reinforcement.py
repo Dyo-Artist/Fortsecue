@@ -26,6 +26,7 @@ def _write_policy(path: Path, *, threshold: int) -> None:
                 "incremental_threshold": threshold,
                 "reinforcement_log": "data/reinforcement_log.jsonl",
                 "max_archive_entries": 5,
+                "seed": 13,
             },
             "coefficient_archive": [],
         }
@@ -164,3 +165,39 @@ def test_retraining_query_does_not_depend_on_updated_at(tmp_path: Path):
 
     assert captured
     assert "updated_at" not in captured[0]
+
+
+
+def test_record_alert_outcome_triggers_threshold_retraining_with_deterministic_seed(tmp_path: Path):
+    from logos.reasoning.path_policy import load_reasoning_policy, record_alert_outcome
+
+    kb_root = tmp_path / "knowledgebase"
+    policy_path = kb_root / "models" / "reasoning_path_policy.yml"
+    _write_policy(policy_path, threshold=2)
+    store = KnowledgebaseStore(base_path=kb_root)
+
+    status_1 = record_alert_outcome(
+        alert_id="a1",
+        outcome_status="closed",
+        model_score=0.9,
+        features={"path_length": 4.0, "recency": 0.9},
+        kb_store=store,
+    )
+    status_2 = record_alert_outcome(
+        alert_id="a2",
+        outcome_status="ignored",
+        model_score=0.1,
+        features={"path_length": 1.0, "recency": 0.1},
+        kb_store=store,
+    )
+
+    assert status_1 == (True, "logged")
+    assert status_2 == (True, "logged_and_retrained")
+
+    updated = load_reasoning_policy(kb_store=store)
+    assert updated.version == "1.0.1"
+    assert updated.coefficients["materialised"] != {"path_length": 0.1}
+
+    archive = yaml.safe_load(policy_path.read_text())["reasoning_policy"]["coefficient_archive"]
+    assert archive[-1]["version"] == "1.0.0"
+    assert "changelog" in archive[-1]
