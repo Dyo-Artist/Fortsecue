@@ -149,7 +149,7 @@ def _extract_identity_candidates(entity: Mapping[str, Any]) -> list[dict[str, An
 
 
 
-def _policy_feature_vector(entry: Mapping[str, Any]) -> dict[str, float]:
+def _build_path_payload(entry: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, float]]:
     interactions = entry.get("interactions") if isinstance(entry.get("interactions"), list) else []
     commitments = entry.get("commitments") if isinstance(entry.get("commitments"), list) else []
 
@@ -186,7 +186,7 @@ def _policy_feature_vector(entry: Mapping[str, Any]) -> dict[str, float]:
         edge_props = {"timestamp": due.isoformat() if due else datetime.now(timezone.utc).isoformat()}
         edges.append({"rel": "COMMITMENT", "props": edge_props})
 
-    return extract_path_features(nodes=nodes, edges=edges)
+    return nodes, edges, extract_path_features(nodes=nodes, edges=edges)
 
 def _pick_primary_id(entity: Mapping[str, Any]) -> tuple[str | None, list[dict[str, Any]]]:
     primary = entity.get("id")
@@ -440,7 +440,8 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             "interaction_count": float(interaction_count),
             "overdue_commitments": float(overdue_commitments),
         }
-        policy_feature_vector = _policy_feature_vector(entry)
+        path_nodes, path_edges, policy_feature_vector = _build_path_payload(entry)
+        path_id = f"{entry.get('entity_id')}:reasoning-path"
         logger.info(
             "execution_trace.path_scoring_invocation entity_id=%s interactions=%d commitments=%d features=%s",
             entry.get("entity_id"),
@@ -453,8 +454,16 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             features=model_feature_vector,
             interactions=entry.get("interactions", []),
             commitments=entry.get("commitments", []),
+            path_id=path_id,
+            path_nodes=path_nodes,
+            path_edges=path_edges,
         )
 
+        top_contributions = sorted(
+            path_score.feature_contributions.items(),
+            key=lambda item: abs(item[1]),
+            reverse=True,
+        )[:3]
         entry["scores"] = {
             "risk_score": float(path_score.risk_score),
             "influence_score": float(path_score.influence_score),
@@ -462,12 +471,25 @@ def compute_scores(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str,
             "interaction_count": interaction_count,
             "overdue_commitments": overdue_commitments,
             "feature_contributions": path_score.feature_contributions,
-            "path_breakdown": path_score.path_breakdown,
             "explanation": path_score.explanation,
             "model_version": path_score.model_version,
             "model_trained": path_score.model_trained,
-            "path_features": policy_feature_vector,
             "model_score": float(path_score.risk_score),
+            "path_features": {**policy_feature_vector, **path_score.feature_vector},
+            "scored_path": {
+                "path_id": path_score.path_id,
+                "path_nodes": path_score.path_nodes,
+                "path_edges": path_score.path_edges,
+                "feature_vector": {**policy_feature_vector, **path_score.feature_vector},
+                "score": float(path_score.risk_score),
+                "model_version": path_score.model_version,
+                "explanation": {
+                    "summary": path_score.explanation,
+                    "top_contributing_features": [
+                        {"feature": key, "contribution": float(value)} for key, value in top_contributions
+                    ],
+                },
+            },
         }
 
     payload = dict(bundle)
@@ -492,107 +514,69 @@ def apply_rules(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[str, An
     unresolved_enabled = _rule_enabled(unresolved_rule)
     sentiment_enabled = _rule_enabled(sentiment_rule)
 
-    status_excluded = _extract_param(unresolved_rule, "status_excluded", ["done", "cancelled"]) or []
-    status_excluded = [str(item).lower() for item in status_excluded if item]
-    age_days = int(_extract_param(unresolved_rule, "age_days", 7))
-
-    min_negative = int(_extract_param(sentiment_rule, "min_negative_count", 3))
+    min_model_score = float(_extract_param(sentiment_rule, "min_model_score", 0.6))
     targets = bundle.get("targets") if isinstance(bundle.get("targets"), Mapping) else {}
-    window_days = int(targets.get("window_days", 14))
-
     alerts: list[dict[str, Any]] = []
 
     scores = bundle.get("scores") if isinstance(bundle.get("scores"), Mapping) else {}
-    commitments = targets.get("commitments") if isinstance(targets.get("commitments"), list) else []
-
     now = datetime.now(timezone.utc)
 
-    if unresolved_enabled:
-        for row in commitments:
-            if not isinstance(row, Mapping):
-                continue
-            commitment = row.get("commitment") if isinstance(row.get("commitment"), Mapping) else None
-            related = row.get("related") if isinstance(row.get("related"), list) else []
-            if not commitment:
-                continue
-            status = commitment.get("status")
-            status_str = str(status).lower() if status is not None else ""
-            if status_str and status_str in status_excluded:
-                continue
-            due_date = _normalise_datetime(commitment.get("due_date"))
-            if not due_date:
-                continue
-            age = (now - due_date).days
-            if age < age_days:
-                continue
+    for entity_id, entry in scores.items():
+        if not isinstance(entry, Mapping):
+            continue
+        score_block = entry.get("scores") if isinstance(entry.get("scores"), Mapping) else {}
+        scored_path = score_block.get("scored_path") if isinstance(score_block.get("scored_path"), Mapping) else {}
+        model_score = float(score_block.get("model_score", score_block.get("risk_score", 0.0)) or 0.0)
 
-            entity_ids = []
-            candidates: list[dict[str, Any]] = []
-            for entity in related:
-                if not isinstance(entity, Mapping):
-                    continue
-                entity_id, identity_candidates = _pick_primary_id(entity)
-                if entity_id:
-                    entity_ids.append(entity_id)
-                candidates.extend(identity_candidates)
-            if not entity_ids and commitment.get("id"):
-                entity_ids.append(str(commitment.get("id")))
+        if not score_block.get("model_trained"):
+            logger.warning("Alert scoring fallback active for entity_id=%s because path model is not trained", entity_id)
 
-            for entity_id in entity_ids or []:
-                entry = scores.get(entity_id) if isinstance(scores, Mapping) else {}
-                score_block = entry.get("scores") if isinstance(entry, Mapping) and isinstance(entry.get("scores"), Mapping) else {}
-                alert_id = _alert_id("unresolved_commitment", entity_id, str(commitment.get("id")))
-                alerts.append(
-                    {
-                        "id": alert_id,
-                        "type": "unresolved_commitment",
-                        "status": "open",
-                        "entity_id": entity_id,
-                        "entity_candidates": candidates,
-                        "commitment_id": commitment.get("id"),
-                        "rule_id": "unresolved_commitment",
-                        "summary": commitment.get("text") or commitment.get("name"),
-                        "due_date": due_date.isoformat(),
-                        "age_days": age,
-                        "path_features": (score_block.get("path_features") if isinstance(score_block, Mapping) else None),
-                        "model_score": (score_block.get("model_score") if isinstance(score_block, Mapping) else score_block.get("risk_score") if isinstance(score_block, Mapping) else None),
-                        "model_version": (score_block.get("model_version") if isinstance(score_block, Mapping) else None),
-                        "provenance": {
-                            "pipeline": "pipeline.reasoning_alerts",
-                            "rule": "unresolved_commitment",
-                            "evaluated_at": now.isoformat(),
-                        },
-                    }
-                )
+        if model_score < min_model_score:
+            continue
 
-    if sentiment_enabled:
-        for entity_id, entry in scores.items():
-            if not isinstance(entry, Mapping):
-                continue
-            score_block = entry.get("scores") if isinstance(entry.get("scores"), Mapping) else {}
-            negative_streak = int(score_block.get("negative_sentiment_streak", 0))
-            if negative_streak < min_negative:
-                continue
-            alert_id = _alert_id("sentiment_drop", entity_id)
+        if unresolved_enabled:
             alerts.append(
                 {
-                    "id": alert_id,
+                    "id": _alert_id("learned_unresolved_commitment", entity_id),
+                    "type": "unresolved_commitment",
+                    "status": "open",
+                    "entity_id": entity_id,
+                    "entity_candidates": entry.get("identity_candidates", []),
+                    "rule_id": "learned_path_score",
+                    "summary": f"Model scored path risk at {model_score:.2f}",
+                    "risk_score": score_block.get("risk_score"),
+                    "influence_score": score_block.get("influence_score"),
+                    "scored_path": scored_path,
+                    "path_features": scored_path.get("feature_vector") if isinstance(scored_path, Mapping) else None,
+                    "model_score": model_score,
+                    "model_version": score_block.get("model_version"),
+                    "provenance": {
+                        "pipeline": "pipeline.reasoning_alerts",
+                        "rule": "learned_path_score",
+                        "evaluated_at": now.isoformat(),
+                    },
+                }
+            )
+
+        if sentiment_enabled:
+            alerts.append(
+                {
+                    "id": _alert_id("learned_sentiment_drop", entity_id),
                     "type": "sentiment_drop",
                     "status": "open",
                     "entity_id": entity_id,
                     "entity_candidates": entry.get("identity_candidates", []),
-                    "rule_id": "sentiment_drop",
-                    "summary": f"{negative_streak} negative interactions in {window_days} days",
-                    "negative_streak": negative_streak,
-                    "window_days": window_days,
+                    "rule_id": "learned_path_score",
+                    "summary": f"Model scored path risk at {model_score:.2f}",
                     "risk_score": score_block.get("risk_score"),
                     "influence_score": score_block.get("influence_score"),
-                    "path_features": score_block.get("path_features"),
-                    "model_score": score_block.get("model_score", score_block.get("risk_score")),
+                    "scored_path": scored_path,
+                    "path_features": scored_path.get("feature_vector") if isinstance(scored_path, Mapping) else None,
+                    "model_score": model_score,
                     "model_version": score_block.get("model_version"),
                     "provenance": {
                         "pipeline": "pipeline.reasoning_alerts",
-                        "rule": "sentiment_drop",
+                        "rule": "learned_path_score",
                         "evaluated_at": now.isoformat(),
                     },
                 }
@@ -653,6 +637,7 @@ def materialise_alerts(bundle: Mapping[str, Any], ctx: PipelineContext) -> Dict[
                 "age_days": alert.get("age_days"),
                 "entity_candidates": alert.get("entity_candidates"),
                 "path_features": alert.get("path_features"),
+                "scored_path": alert.get("scored_path"),
                 "model_score": alert.get("model_score", alert.get("risk_score")),
                 "model_version": alert.get("model_version"),
                 "updated_at": now.isoformat(),

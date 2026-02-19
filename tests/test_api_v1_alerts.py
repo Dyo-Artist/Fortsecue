@@ -91,3 +91,31 @@ def test_api_v1_alerts_filters(monkeypatch):
         "total_items": 12,
         "total_pages": 3,
     }
+
+
+
+def test_api_v1_alert_outcome_logs_reinforcement(monkeypatch):
+    client = TestClient(main.app)
+
+    class FakeClient:
+        def run(self, query, params):
+            assert params["status"] == "closed"
+            return [{"alert_id": "a1", "path_features": {"path_length": 2.0}, "model_score": 0.88}]
+
+    monkeypatch.setattr(alerts_route, "get_client", lambda: FakeClient())
+
+    captured = {}
+
+    def fake_record_alert_outcome(**kwargs):
+        captured.update(kwargs)
+        return True, "logged_and_retrained"
+
+    monkeypatch.setattr(alerts_route, "record_alert_outcome", fake_record_alert_outcome)
+
+    response = client.patch("/api/v1/alerts/a1/outcome", json={"status": "closed"})
+
+    assert response.status_code == 200
+    assert response.json()["retraining_action"] == "logged_and_retrained"
+    assert captured["alert_id"] == "a1"
+    assert captured["outcome_status"] == "closed"
+    assert captured["features"]["path_length"] == 2.0

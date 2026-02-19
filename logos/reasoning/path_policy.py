@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from math import exp
+import random
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -15,6 +16,7 @@ POLICY_VERSION = "1.0.0"
 POLICY_KB_PATH = "models/reasoning_path_policy.yml"
 REINFORCEMENT_LOG_REL_PATH = "data/reinforcement_log.jsonl"
 OUTCOMES = ("acknowledged", "materialised", "false_positive")
+OUTCOME_STATUS_MAP = {"acknowledged": "acknowledged", "closed": "materialised", "ignored": "false_positive"}
 FEATURE_KEYS = (
     "path_length",
     "recency",
@@ -141,6 +143,81 @@ def sync_reinforcement_log(
     return appended
 
 
+def _load_reinforcement_samples(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            text = line.strip()
+            if not text:
+                continue
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, Mapping):
+                rows.append(dict(payload))
+    rows.sort(key=lambda row: str(row.get("sample_key") or ""))
+    return rows
+
+
+def _retraining_threshold(retraining_cfg: Mapping[str, Any]) -> int:
+    threshold = retraining_cfg.get("incremental_threshold", 25)
+    if not isinstance(threshold, int) or threshold <= 0:
+        return 25
+    return threshold
+
+
+def record_alert_outcome(
+    *,
+    alert_id: str,
+    outcome_status: str,
+    model_score: float,
+    features: Mapping[str, Any],
+    timestamp: str | None = None,
+    kb_store: KnowledgebaseStore | None = None,
+    run_query: Callable[[str, Mapping[str, Any]], Sequence[Mapping[str, Any]]] | None = None,
+) -> tuple[bool, str]:
+    store = kb_store or KnowledgebaseStore()
+    retraining_cfg = _retraining_config(store)
+    outcome_label = OUTCOME_STATUS_MAP.get(_normalise_outcome(outcome_status))
+    if not outcome_label:
+        return False, "ignored"
+
+    sample = {
+        "alert_id": alert_id,
+        "path_features": dict(features),
+        "model_score": float(model_score),
+        "outcome_label": outcome_label,
+        "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
+    }
+    appended = sync_reinforcement_log([sample], kb_store=store, retraining_cfg=retraining_cfg)
+    if not appended:
+        return False, "deduplicated"
+
+    threshold = _retraining_threshold(retraining_cfg)
+    path = _reinforcement_log_path(store, retraining_cfg)
+    rows = _load_reinforcement_samples(path)
+    if len(rows) < threshold:
+        return True, "logged"
+
+    loaded = load_reasoning_policy(kb_store=store)
+    seed = retraining_cfg.get("seed", 13)
+    if not isinstance(seed, int):
+        seed = 13
+    trained = train_reasoning_policy(rows, version=_next_version(loaded.version), seed=seed)
+    archive_entry = {
+        "version": loaded.version,
+        "trained_at": loaded.trained_at,
+        "archived_at": datetime.now(timezone.utc).isoformat(),
+        "intercepts": loaded.intercepts,
+        "coefficients": loaded.coefficients,
+        "changelog": f"retrained_from_{len(rows)}_labelled_samples",
+    }
+    persist_reasoning_policy(trained, kb_store=store, graph_run=run_query, archive_entry=archive_entry)
+    return True, "logged_and_retrained"
+
 
 def _sigmoid(value: float) -> float:
     if value >= 0:
@@ -256,7 +333,9 @@ def _fit_binary_logistic(
     epochs: int = 300,
     learning_rate: float = 0.08,
     l2: float = 0.001,
+    seed: int = 13,
 ) -> tuple[dict[str, float], float]:
+    random.seed(seed)
     keys = sorted({key for sample in samples for key in sample.keys()})
     weights = {key: 0.0 for key in keys}
     bias = 0.0
@@ -287,10 +366,13 @@ def train_reasoning_policy(
     policy_id: str = POLICY_ID,
     version: str = POLICY_VERSION,
     trained_at: str | None = None,
+    seed: int = 13,
 ) -> ReasoningPathPolicy:
+    random.seed(seed)
     samples: list[dict[str, float]] = []
     labels: list[str] = []
-    for row in labelled_rows:
+    ordered_rows = sorted(labelled_rows, key=lambda row: str(row.get("sample_key") or row.get("alert_id") or ""))
+    for row in ordered_rows:
         outcome = _normalise_outcome(row.get("outcome_label") or row.get("outcome"))
         if outcome not in OUTCOMES:
             continue
@@ -320,7 +402,7 @@ def train_reasoning_policy(
     intercepts: dict[str, float] = {}
     for outcome in OUTCOMES:
         binary = [1 if label == outcome else 0 for label in labels]
-        weights, bias = _fit_binary_logistic(samples, binary)
+        weights, bias = _fit_binary_logistic(samples, binary, seed=seed)
         coefficients[outcome] = weights
         intercepts[outcome] = bias
 
@@ -491,9 +573,7 @@ def load_or_train_and_persist_policy(
     labelled = [row for row in rows if isinstance(row, Mapping)]
     new_samples = sync_reinforcement_log(labelled, kb_store=store, retraining_cfg=retraining_cfg)
 
-    threshold = retraining_cfg.get("incremental_threshold", 25)
-    if not isinstance(threshold, int) or threshold <= 0:
-        threshold = 25
+    threshold = _retraining_threshold(retraining_cfg)
 
     if loaded.coefficients.get("materialised") and new_samples < threshold:
         return loaded
@@ -502,13 +582,17 @@ def load_or_train_and_persist_policy(
         return loaded
 
     next_version = _next_version(loaded.version)
-    trained = train_reasoning_policy(labelled, version=next_version)
+    seed = retraining_cfg.get("seed", 13) if isinstance(retraining_cfg, Mapping) else 13
+    if not isinstance(seed, int):
+        seed = 13
+    trained = train_reasoning_policy(labelled, version=next_version, seed=seed)
     archive_entry = {
         "version": loaded.version,
         "trained_at": loaded.trained_at,
         "archived_at": datetime.now(timezone.utc).isoformat(),
         "intercepts": loaded.intercepts,
         "coefficients": loaded.coefficients,
+        "changelog": f"retrained_from_{len(labelled)}_graph_samples",
     }
     persist_reasoning_policy(trained, kb_store=store, graph_run=run_query, archive_entry=archive_entry)
     return trained

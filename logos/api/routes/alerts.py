@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from math import ceil
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from ...core.pipeline_executor import PipelineContext, PipelineStageError, run_pipeline
 from ...graphio import queries as graph_queries
 from ...graphio.neo4j_client import GraphUnavailable, get_client
+from ...knowledgebase.store import KnowledgebaseStore
+from ...reasoning.path_policy import record_alert_outcome
 
 router = APIRouter()
+
+
+class AlertOutcomeUpdate(BaseModel):
+    status: str
+
 
 def _run_reasoning_alerts() -> None:
     context = PipelineContext(
@@ -67,4 +76,48 @@ async def list_alerts(
         "page_size": page_size,
         "total_items": total,
         "total_pages": total_pages,
+    }
+
+
+@router.patch("/alerts/{alert_id}/outcome")
+async def update_alert_outcome(alert_id: str, payload: AlertOutcomeUpdate) -> dict[str, object]:
+    new_status = payload.status.strip().lower()
+    if new_status not in {"acknowledged", "closed", "ignored"}:
+        return JSONResponse(status_code=400, content={"error": "invalid_status"})
+
+    timestamp = datetime.now(timezone.utc).isoformat()
+    rows = get_client().run(
+        (
+            "MATCH (a) "
+            "WHERE any(label IN labels(a) WHERE toLower(label) CONTAINS 'alert') "
+            "AND a.id = $alert_id "
+            "SET a.status = $status, "
+            "    a.outcome = $status, "
+            "    a.outcome_at = datetime($timestamp), "
+            "    a.last_updated_at = datetime($timestamp) "
+            "RETURN a.id AS alert_id, "
+            "       coalesce(a.path_features, a.scored_path.feature_vector, {}) AS path_features, "
+            "       coalesce(a.model_score, a.risk_score, 0.0) AS model_score"
+        ),
+        {"alert_id": alert_id, "status": new_status, "timestamp": timestamp},
+    )
+    if not rows:
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+
+    row = rows[0]
+    logged, action = record_alert_outcome(
+        alert_id=str(row.get("alert_id") or alert_id),
+        outcome_status=new_status,
+        model_score=float(row.get("model_score", 0.0) or 0.0),
+        features=row.get("path_features") if isinstance(row.get("path_features"), dict) else {},
+        timestamp=timestamp,
+        kb_store=KnowledgebaseStore(),
+        run_query=get_client().run,
+    )
+
+    return {
+        "alert_id": alert_id,
+        "status": new_status,
+        "reinforcement_logged": logged,
+        "retraining_action": action,
     }

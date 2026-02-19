@@ -53,29 +53,48 @@ def test_compute_scores_uses_neutral_fallback_when_path_model_untrained(caplog):
     assert any("not trained" in msg.lower() for msg in caplog.messages)
 
 
-def test_compute_scores_explanation_contains_feature_contributions_and_path_breakdown(monkeypatch):
-    def fake_load_reasoning_path_model(*, kb_store=None):
-        class Model:
-            version = "test-v1"
-            trained = True
-            coefficients = {"interaction_count": 0.2, "overdue_commitments": 0.4, "negative_sentiment_streak": 0.3}
-            intercept = 0.1
+def test_compute_scores_invokes_path_model(monkeypatch):
+    calls = {"count": 0}
 
-        return Model()
+    def fake_score_entity_path(*, model, features, interactions, commitments, path_id, path_nodes, path_edges):
+        calls["count"] += 1
 
-    monkeypatch.setattr(
-        "logos.pipelines.reasoning_alerts.load_reasoning_path_model",
-        fake_load_reasoning_path_model,
-    )
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            risk_score=0.77,
+            influence_score=0.25,
+            feature_contributions={"interaction_count": 0.33},
+            explanation="ok",
+            model_version="v-test",
+            model_trained=True,
+            path_id=path_id,
+            path_nodes=list(path_nodes),
+            path_edges=list(path_edges),
+            feature_vector=dict(features),
+        )
+
+    monkeypatch.setattr("logos.pipelines.reasoning_alerts.score_entity_path", fake_score_entity_path)
 
     scored = compute_scores(_bundle(), PipelineContext())
+    assert calls["count"] == 1
     entry = scored["scores"]["person-1"]["scores"]
+    assert entry["model_score"] == 0.77
 
-    assert entry["model_trained"] is True
-    assert isinstance(entry["feature_contributions"], dict)
-    assert entry["feature_contributions"]
-    assert isinstance(entry["path_breakdown"], list)
-    assert {item["path_segment"] for item in entry["path_breakdown"]} == {"interactions", "commitments"}
-    assert "path_length" in entry["path_features"]
-    assert "recency" in entry["path_features"]
-    assert entry["model_score"] == entry["risk_score"]
+
+def test_compute_scores_includes_standard_scored_path_model():
+    scored = compute_scores(_bundle(), PipelineContext())
+    entry = scored["scores"]["person-1"]["scores"]
+    scored_path = entry["scored_path"]
+
+    assert set(scored_path.keys()) == {
+        "path_id",
+        "path_nodes",
+        "path_edges",
+        "feature_vector",
+        "score",
+        "model_version",
+        "explanation",
+    }
+    assert "top_contributing_features" in scored_path["explanation"]
+    assert entry["path_features"] == scored_path["feature_vector"]
