@@ -107,6 +107,7 @@ async def ingest_doc(doc: Doc) -> dict[str, object]:
             "source_uri": doc.source_uri,
             "staging_store": app_state.STAGING_STORE,
             "pending_interactions": app_state.PENDING_INTERACTIONS,
+            "knowledgebase_path": app_state.KB_PATH,
         },
     )
     try:
@@ -147,6 +148,7 @@ async def ingest_note(note: Note) -> dict[str, object]:
             "source_uri": note.source_uri or "",
             "staging_store": app_state.STAGING_STORE,
             "pending_interactions": app_state.PENDING_INTERACTIONS,
+            "knowledgebase_path": app_state.KB_PATH,
         },
     )
     try:
@@ -269,6 +271,7 @@ async def ingest_audio(payload: AudioPayload) -> dict[str, object]:
             "source_uri": payload.source_uri,
             "staging_store": app_state.STAGING_STORE,
             "pending_interactions": app_state.PENDING_INTERACTIONS,
+            "knowledgebase_path": app_state.KB_PATH,
         },
     )
     try:
