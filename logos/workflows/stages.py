@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Mapping
 from uuid import uuid4
 
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
+from logos.beliefs import BeliefProjection, Neo4jBeliefStore
 from logos.memory import MemoryItem, MemoryManager
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.information.converters import belief_candidates_from_interaction_bundle
@@ -536,6 +537,12 @@ def upsert_interaction_bundle_stage(
         upsert_interaction_bundle(tx, bundle, commit_time, schema_store=schema_store)
 
     client.run_in_tx(_tx)
+
+    try:
+        belief_projection = BeliefProjection(Neo4jBeliefStore(client))
+        context["belief_projection_summary"] = belief_projection.apply(context.get("belief_candidates"))
+    except Exception as exc:  # pragma: no cover - belief projection is non-fatal sidecar
+        logger.warning("belief_projection_failed", extra={"interaction_id": bundle.interaction.id, "error": str(exc)})
 
     if hasattr(client, "run"):
         try:
