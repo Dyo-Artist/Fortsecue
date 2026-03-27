@@ -52,11 +52,16 @@ class Neo4jBeliefStore:
         provenance = belief.get("provenance") if isinstance(belief.get("provenance"), Mapping) else {}
         predicate = statement.get("predicate") if isinstance(statement.get("predicate"), str) else belief.get("predicate")
 
+        subject = statement.get("subject") if isinstance(statement.get("subject"), Mapping) else {}
+        obj = statement.get("object") if isinstance(statement.get("object"), Mapping) else {}
+
         params = {
             "belief_id": str(belief.get("id", "")),
             "status": str(belief.get("status", "candidate")),
             "polarity": str(belief.get("polarity", "unknown")),
             "predicate": str(predicate or ""),
+            "subject_ref": str(subject.get("ref") or ""),
+            "object_ref": str(obj.get("ref") or obj.get("value") or ""),
             "confidence": float(belief.get("confidence", 0.5) or 0.5),
             "created_at": timestamp,
             "updated_at": timestamp,
@@ -74,6 +79,8 @@ class Neo4jBeliefStore:
                 b.polarity = $polarity,
                 b.predicate = $predicate,
                 b.confidence = $confidence,
+                b.subject_ref = $subject_ref,
+                b.object_ref = $object_ref,
                 b.statement = $statement_json,
                 b.provenance = $provenance_json,
                 b.updated_at = $updated_at

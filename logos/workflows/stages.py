@@ -8,6 +8,7 @@ from uuid import uuid4
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.beliefs import BeliefProjection, Neo4jBeliefStore
 from logos.memory import MemoryItem, MemoryManager
+from logos.contradictions import ContradictionEngine, ContradictionProjection, belief_subject_predicate_pairs
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
 from logos.information.converters import belief_candidates_from_interaction_bundle
 from logos.nlp.extract import extract_all
@@ -543,6 +544,23 @@ def upsert_interaction_bundle_stage(
         context["belief_projection_summary"] = belief_projection.apply(context.get("belief_candidates"))
     except Exception as exc:  # pragma: no cover - belief projection is non-fatal sidecar
         logger.warning("belief_projection_failed", extra={"interaction_id": bundle.interaction.id, "error": str(exc)})
+
+    try:
+        belief_candidates = context.get("belief_candidates") if isinstance(context.get("belief_candidates"), Mapping) else {}
+        new_beliefs = belief_candidates.get("beliefs") if isinstance(belief_candidates.get("beliefs"), list) else []
+        projection = ContradictionProjection(client)
+        existing_beliefs = projection.fetch_existing_beliefs_for_subject_predicates(
+            belief_subject_predicate_pairs(new_beliefs),
+            exclude_belief_ids=[str(item.get("id")) for item in new_beliefs if isinstance(item, Mapping) and item.get("id")],
+        )
+        engine = ContradictionEngine()
+        result = engine.detect(new_beliefs=new_beliefs, existing_beliefs=existing_beliefs)
+        context["contradiction_summary"] = {
+            **result.counts,
+            **projection.persist(result.contradictions),
+        }
+    except Exception as exc:  # pragma: no cover - contradiction projection is non-fatal sidecar
+        logger.warning("contradiction_projection_failed", extra={"interaction_id": bundle.interaction.id, "error": str(exc)})
 
     if hasattr(client, "run"):
         try:
