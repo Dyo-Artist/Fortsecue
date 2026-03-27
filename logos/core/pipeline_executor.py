@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,8 @@ from logos.core.ontology_guard import OntologyIntegrityGuard
 from logos.feedback.store import append_feedback
 from logos.interfaces.local_asr_stub import TranscriptionFailure
 from logos.knowledgebase.store import DEFAULT_BASE_PATH
+from logos import app_state
+from logos.events.types import EventEnvelope
 from logos.models.bundles import (
     ExtractionBundle,
     FeedbackBundle,
@@ -161,6 +164,112 @@ def _extract_interaction_id(bundle: Any) -> str | None:
     return None
 
 
+def _extract_correlation_id(bundle: Any, ctx: PipelineContext, fallback_bundle: Any | None = None) -> str | None:
+    candidate = _extract_interaction_id(bundle)
+    if candidate:
+        return candidate
+    if fallback_bundle is not None:
+        candidate = _extract_interaction_id(fallback_bundle)
+        if candidate:
+            return candidate
+
+    context = ctx.context_data if isinstance(ctx.context_data, Mapping) else {}
+    for key in ("interaction_id", "correlation_id", "request_id"):
+        value = context.get(key)
+        if value:
+            return str(value)
+    if ctx.request_id:
+        return str(ctx.request_id)
+    return None
+
+
+def _bundle_payload_digest(bundle: Any) -> str:
+    try:
+        if isinstance(bundle, BaseModel):
+            canonical = bundle.model_dump(mode="json", exclude_none=True)
+        elif isinstance(bundle, Mapping):
+            canonical = dict(bundle)
+        else:
+            canonical = {"repr": repr(bundle)}
+        encoded = repr(sorted(canonical.items())).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+    except Exception:
+        return hashlib.sha256(repr(bundle).encode("utf-8")).hexdigest()
+
+
+def _pipeline_payload_level() -> str:
+    level = os.getenv("LOGOS_PIPELINE_EVENT_PAYLOAD_LEVEL", "minimal").strip().lower()
+    return "debug" if level == "debug" else "minimal"
+
+
+def _build_stage_event_payload(
+    stage_id: str,
+    status: str,
+    *,
+    bundle: Any,
+    duration_ms: float | None = None,
+    exc: Exception | None = None,
+    ctx: PipelineContext,
+) -> Dict[str, object]:
+    payload: Dict[str, object] = {
+        "stage_id": stage_id,
+        "status": status,
+        "bundle_type": type(bundle).__name__,
+        "bundle_digest": _bundle_payload_digest(bundle),
+    }
+    if isinstance(bundle, Mapping):
+        payload["bundle_keys"] = sorted(str(key) for key in bundle.keys())
+    elif isinstance(bundle, BaseModel):
+        payload["bundle_keys"] = sorted(bundle.model_dump(exclude_none=True).keys())
+
+    if duration_ms is not None:
+        payload["duration_ms"] = round(duration_ms, 2)
+
+    if exc is not None:
+        payload["exception"] = {
+            "type": exc.__class__.__name__,
+            "message": str(exc),
+        }
+
+    if _pipeline_payload_level() == "debug":
+        payload["context_keys"] = sorted(str(key) for key in ctx.context_data.keys())
+    return payload
+
+
+def _publish_pipeline_event(
+    *,
+    event_type: str,
+    stage_id: str,
+    status: str,
+    bundle: Any,
+    ctx: PipelineContext,
+    correlation_id: str | None,
+    duration_ms: float | None = None,
+    exc: Exception | None = None,
+) -> None:
+    envelope = EventEnvelope(
+        event_type=event_type,
+        producer="logos.core.pipeline_executor",
+        correlation_id=correlation_id,
+        provenance={"component": "pipeline_executor", "pipeline_stage": stage_id},
+        payload=_build_stage_event_payload(
+            stage_id,
+            status,
+            bundle=bundle,
+            duration_ms=duration_ms,
+            exc=exc,
+            ctx=ctx,
+        ),
+    )
+    try:
+        app_state.EVENT_BUS.publish(envelope)
+    except Exception:
+        ctx.logger.exception(
+            "Failed to publish pipeline stage event",
+            extra={"event_type": event_type, "stage_id": stage_id},
+        )
+
+
 def _propagate_meta(previous: Any, new_bundle: Any) -> Any:
     previous_meta_id: str | None = None
     previous_meta = getattr(previous, "meta", None)
@@ -217,16 +326,44 @@ def run_pipeline(
     bundle: Any = bundle_in
     for stage_id in pipelines[pipeline_id]:
         stage_fn = stage_registry.get(stage_id)
+        correlation_id = _extract_correlation_id(bundle, ctx, bundle_in)
+        _publish_pipeline_event(
+            event_type="logos.pipeline.stage_started",
+            stage_id=stage_id,
+            status="started",
+            bundle=bundle,
+            ctx=ctx,
+            correlation_id=correlation_id,
+        )
         started = time.perf_counter()
         previous = bundle
         try:
             bundle = stage_fn(bundle, ctx)
             bundle = _propagate_meta(previous, bundle)
             duration_ms = (time.perf_counter() - started) * 1000
-            _log_stage(ctx, stage_id, _extract_interaction_id(bundle) or _extract_interaction_id(bundle_in), duration_ms, "success")
+            _log_stage(ctx, stage_id, correlation_id, duration_ms, "success")
+            _publish_pipeline_event(
+                event_type="logos.pipeline.stage_finished",
+                stage_id=stage_id,
+                status="success",
+                bundle=bundle,
+                ctx=ctx,
+                correlation_id=correlation_id,
+                duration_ms=duration_ms,
+            )
         except Exception as exc:
             duration_ms = (time.perf_counter() - started) * 1000
-            _log_stage(ctx, stage_id, _extract_interaction_id(bundle) or _extract_interaction_id(bundle_in), duration_ms, "failure", exc)
+            _log_stage(ctx, stage_id, correlation_id, duration_ms, "failure", exc)
+            _publish_pipeline_event(
+                event_type="logos.pipeline.stage_failed",
+                stage_id=stage_id,
+                status="failure",
+                bundle=previous,
+                ctx=ctx,
+                correlation_id=correlation_id,
+                duration_ms=duration_ms,
+                exc=exc,
+            )
             raise PipelineStageError(stage_id, exc) from exc
 
     return bundle
