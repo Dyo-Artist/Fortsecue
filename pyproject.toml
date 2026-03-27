@@ -9,8 +9,10 @@ description = "LOGOS Cognitive Engine and Stakeholder Engagement MVP"
 authors = [
   { name = "Lachlan Robertson", email = "lachlanrobertson@iinet.net.au" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12"
 ]
 

@@ -15,3 +15,6 @@ pytest==8.4.1
 pytest-asyncio==0.24.0
 pytest-mock==3.14.0
 ruff==0.12.7
+
+# Optional dependency for Redis Streams event bus backend (LOGOS_EVENT_BUS_BACKEND=redis_streams).
+redis==5.1.1
