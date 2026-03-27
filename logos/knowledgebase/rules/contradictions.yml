@@ -1,0 +1,30 @@
+hard_constraints:
+  - predicate: HAS_SSN
+    cardinality: 1
+    conflict_code: identity_conflict
+    recommended_resolution: "Verify source authority and mark one SSN belief as superseded; keep contradiction artifact for audit."
+  - predicate: OWNS
+    cardinality: 1
+    conflict_code: cardinality_conflict
+    recommended_resolution: "Confirm ownership scope/timeframe and add temporal qualifiers if both may be valid in sequence."
+
+soft_constraints:
+  - predicate: WORKS_WITH
+    conflict_code: value_disagreement
+    recommended_resolution: "Allow multiple links but annotate confidence and context."
+  - predicate: INTERESTED_IN
+    conflict_code: value_disagreement
+    recommended_resolution: "Track competing interests with evidence and revisit after additional observations."
+
+temporal_rules:
+  - predicate: OWNS
+    overlap_conflict: true
+    start_key: start_at
+    end_key: end_at
+    conflict_code: temporal_overlap
+    recommended_resolution: "Split ownership periods or add supersession metadata to avoid overlapping claims."
+
+paradox_allowlist:
+  - predicate: STATE
+    subject_ref: Concept:schrodinger_cat
+    reason: "Intentionally paradoxical modeling is allowed for this conceptual entity."
