@@ -8,6 +8,7 @@ from uuid import uuid4
 from logos.graphio.neo4j_client import GraphUnavailable, get_client
 from logos.memory import MemoryItem, MemoryManager
 from logos.graphio.upsert import InteractionBundle, SCHEMA_STORE, upsert_interaction_bundle
+from logos.information.converters import belief_candidates_from_interaction_bundle
 from logos.nlp.extract import extract_all
 from logos.normalise import build_interaction_bundle
 from logos.normalise.resolution import resolve_preview_from_graph
@@ -503,7 +504,14 @@ def build_interaction_bundle_stage(bundle: Dict[str, Any] | PreviewBundle, conte
     if not interaction_id:
         raise ValueError("Interaction id is required to build the bundle")
 
-    return build_interaction_bundle(interaction_id, payload)
+    interaction_bundle = build_interaction_bundle(interaction_id, payload)
+    correlation_id = context.get("correlation_id") or context.get("pipeline_correlation_id")
+    belief_candidates = belief_candidates_from_interaction_bundle(
+        interaction_bundle,
+        correlation_id=str(correlation_id) if correlation_id is not None else None,
+    )
+    context["belief_candidates"] = belief_candidates.model_dump()
+    return interaction_bundle
 
 
 def upsert_interaction_bundle_stage(
