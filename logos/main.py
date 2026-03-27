@@ -1,6 +1,7 @@
 # This module is part of LOGOS (local-first stakeholder intelligence).
 # It must follow the architecture and schema defined in the LOGOS docs (/docs).
 # Pipeline: ingest → transcribe → nlp_extract → normalise → graphio → ui.
+import asyncio
 import logging
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -52,6 +53,40 @@ PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = app_state.PENDING_INTERACTIONS
 PREVIEWS = PENDING_INTERACTIONS
 STAGING_STORE = app_state.STAGING_STORE
 logger = logging.getLogger(__name__)
+META_CONTROLLER_TASK: asyncio.Task[None] | None = None
+META_CONTROLLER_STOP_EVENT: asyncio.Event | None = None
+
+
+@app.on_event("startup")
+async def startup_event() -> None:
+    global META_CONTROLLER_TASK, META_CONTROLLER_STOP_EVENT
+    controller = app_state.get_meta_controller()
+    if controller is None:
+        return
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning("meta_controller_startup_skipped_no_loop")
+        return
+
+    META_CONTROLLER_STOP_EVENT = asyncio.Event()
+    META_CONTROLLER_TASK = asyncio.create_task(controller.run_forever(META_CONTROLLER_STOP_EVENT))
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    global META_CONTROLLER_TASK, META_CONTROLLER_STOP_EVENT
+    if META_CONTROLLER_STOP_EVENT is not None:
+        META_CONTROLLER_STOP_EVENT.set()
+    if META_CONTROLLER_TASK is not None:
+        META_CONTROLLER_TASK.cancel()
+        try:
+            await META_CONTROLLER_TASK
+        except asyncio.CancelledError:
+            pass
+    META_CONTROLLER_TASK = None
+    META_CONTROLLER_STOP_EVENT = None
 
 
 class Doc(BaseModel):
