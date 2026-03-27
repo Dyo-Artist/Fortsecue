@@ -1,13 +1,17 @@
-"""Event bus abstractions and in-process backend for LOGOS."""
+"""Event bus abstractions and backend selection for LOGOS."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from collections.abc import AsyncIterator
 from threading import Lock
 from typing import Protocol
 
 from .types import EventEnvelope
+
+logger = logging.getLogger(__name__)
 
 
 class EventBus(Protocol):
@@ -66,4 +70,43 @@ class InMemoryEventBus:
             return len(self._subscribers)
 
 
-__all__ = ["EventBus", "InMemoryEventBus"]
+def _resolve_redis_streams_event_bus() -> EventBus | None:
+    from .redis_streams import RedisStreamsEventBus
+
+    redis_url = os.getenv("LOGOS_REDIS_URL", "redis://localhost:6379/0")
+    stream_key = os.getenv("LOGOS_REDIS_STREAM_KEY", "logos:events")
+    consumer_group = os.getenv("LOGOS_REDIS_CONSUMER_GROUP", "logos-consumers")
+    consumer_name = os.getenv("LOGOS_REDIS_CONSUMER_NAME", "logos-node")
+
+    return RedisStreamsEventBus.from_redis_url(
+        redis_url,
+        stream_key=stream_key,
+        consumer_group=consumer_group,
+        consumer_name=consumer_name,
+    )
+
+
+def create_event_bus_from_env() -> EventBus:
+    """Create an event bus backend based on environment configuration."""
+
+    backend = os.getenv("LOGOS_EVENT_BUS_BACKEND", "memory").strip().lower()
+    if backend == "redis_streams":
+        try:
+            redis_bus = _resolve_redis_streams_event_bus()
+        except Exception as exc:
+            logger.warning("Failed to initialise Redis Streams event bus; falling back to memory: %s", exc)
+            return InMemoryEventBus()
+
+        if redis_bus is None:
+            logger.warning("Redis Streams backend requested but unavailable; falling back to memory")
+            return InMemoryEventBus()
+
+        return redis_bus
+
+    if backend != "memory":
+        logger.warning("Unknown LOGOS_EVENT_BUS_BACKEND='%s'; falling back to memory", backend)
+
+    return InMemoryEventBus()
+
+
+__all__ = ["EventBus", "InMemoryEventBus", "create_event_bus_from_env"]
