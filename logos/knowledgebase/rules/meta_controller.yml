@@ -1,0 +1,45 @@
+mode: shadow
+activation_threshold: 0.45
+
+experimentation:
+  learning_loop_mode: unified
+  alternatives:
+    - unified
+    - separate
+
+activation_graph:
+  seed: 19
+  damping: 0.85
+  propagation_steps: 2
+  noise_scale: 0.0
+  base_activation:
+    module.belief_prior_adjuster: 0.2
+    module.ontology_proposal_summariser: 0.2
+    module.learning_signal_router: 0.2
+  edges:
+    - from: module.belief_prior_adjuster
+      to: module.learning_signal_router
+      weight: 0.2
+    - from: module.ontology_proposal_summariser
+      to: module.learning_signal_router
+      weight: 0.25
+    - from: module.learning_signal_router
+      to: module.belief_prior_adjuster
+      weight: 0.15
+
+event_injection:
+  "*":
+    module.belief_prior_adjuster: 0.05
+  logos.pipeline.stage_completed:
+    module.learning_signal_router: 0.4
+  logos.ontology.candidate_detected:
+    module.ontology_proposal_summariser: 0.5
+  logos.feedback.received:
+    module.learning_signal_router: 0.35
+
+active_allowlist:
+  pipelines:
+    - pipeline.concept_update
+    - pipeline.reasoning_alerts
+  modules:
+    - module.learning_signal_router
