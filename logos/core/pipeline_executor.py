@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from logos.ingest import doc_ingest, note_ingest
 from logos.core.ontology_guard import OntologyIntegrityGuard
 from logos.feedback.store import append_feedback
 from logos.interfaces.local_asr_stub import TranscriptionFailure
+from logos.knowledgebase.store import DEFAULT_BASE_PATH
 from logos.models.bundles import (
     ExtractionBundle,
     FeedbackBundle,
@@ -85,6 +87,10 @@ class PipelineContext:
     def to_mapping(self) -> Dict[str, Any]:
         """Expose a mutable mapping for legacy stage helpers."""
 
+        if "knowledgebase_path" not in self.context_data:
+            self.context_data["knowledgebase_path"] = Path(
+                os.getenv("LOGOS_KB_DIR", str(DEFAULT_BASE_PATH))
+            )
         if self.request_id is not None:
             self.context_data.setdefault("request_id", self.request_id)
         if self.user_id is not None:

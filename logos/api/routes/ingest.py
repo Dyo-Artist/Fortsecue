@@ -129,6 +129,7 @@ async def commit_interaction_api(
             "commit_time": datetime.now(timezone.utc),
             "graph_update_builder": build_graph_update_event,
             "feedback_bundle": feedback_bundle,
+            "knowledgebase_path": app_state.KB_PATH,
         },
     )
     try:
@@ -191,6 +192,7 @@ async def commit_interaction(interaction_id: str) -> dict[str, object]:
                 "commit_time": datetime.now(timezone.utc),
                 "graph_update_builder": build_graph_update_event,
                 "feedback_bundle": feedback_bundle,
+                "knowledgebase_path": app_state.KB_PATH,
             },
         )
         summary = run_pipeline("pipeline.interaction_commit", preview, context)
