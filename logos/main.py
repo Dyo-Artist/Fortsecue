@@ -21,6 +21,7 @@ from .api.routes.alerts import router as alerts_router
 from .api.routes.agents import router as agents_router
 from .api.routes.concepts import legacy_router as concepts_legacy_router
 from .api.routes.concepts import router as concepts_router
+from .api.routes.events import router as events_router
 from . import app_state
 from .core.pipeline_executor import PipelineContext, run_pipeline
 from .graphio import graph_views
@@ -43,6 +44,7 @@ app.include_router(alerts_router, prefix="/api/v1")
 app.include_router(ingest_router, prefix="/api/v1")
 app.include_router(agents_router, prefix="/api/v1")
 app.include_router(concepts_router, prefix="/api/v1")
+app.include_router(events_router, prefix="/api/v1")
 app.include_router(ingest_legacy_router)
 app.include_router(concepts_legacy_router)
 PENDING_INTERACTIONS: Dict[str, Dict[str, Any]] = app_state.PENDING_INTERACTIONS

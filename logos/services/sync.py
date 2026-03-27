@@ -11,6 +11,8 @@ from typing import Any, Dict, List
 from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict, Field
 
+from logos import app_state
+from logos.events.types import EventEnvelope
 from logos.graphio.upsert import InteractionBundle
 
 logger = logging.getLogger(__name__)
@@ -98,6 +100,10 @@ class UpdateBroadcaster:
 
     async def broadcast(self, message: GraphUpdateEvent | Dict[str, Any]) -> None:
         payload = message.model_dump(mode="json") if isinstance(message, GraphUpdateEvent) else message
+        try:
+            self._publish_to_event_bus(payload)
+        except Exception:  # pragma: no cover - defensive guard to preserve existing flows
+            logger.exception("Failed to publish graph update event to EventBus")
         async with self._lock:
             connections = list(self._connections)
 
@@ -110,6 +116,17 @@ class UpdateBroadcaster:
 
         for websocket in stale:
             await self.unregister(websocket)
+
+    def _publish_to_event_bus(self, payload: Dict[str, Any]) -> None:
+        """Publish a graph update payload to the shared EventBus."""
+
+        envelope = EventEnvelope(
+            event_type="logos.graph.update",
+            producer="logos.services.sync.UpdateBroadcaster",
+            provenance={"channel": "ws/updates", "component": "sync"},
+            payload=payload,
+        )
+        app_state.EVENT_BUS.publish(envelope)
 
     def queue_broadcast(self, message: GraphUpdateEvent | Dict[str, Any]) -> None:
         """Schedule a broadcast from synchronous contexts."""
